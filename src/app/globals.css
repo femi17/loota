@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+:root {
+  --loota-primary: #06cee0;
+  --loota-bg-light: #f0f2f4;
+  --loota-bg-dark: #16181d;
+  --loota-text-light: #0d1b1c;
+  --loota-text-dark: #f8fcfc;
+}
+
+body {
+  font-family:
+    "Plus Jakarta Sans",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+::selection {
+  background: var(--loota-primary);
+  color: white;
+}
+
+.map-bg {
+  background-image: linear-gradient(
+      rgba(240, 242, 244, 0.72),
+      rgba(240, 242, 244, 0.72)
+    ),
+    url(https://lh3.googleusercontent.com/aida-public/AB6AXuBVqtNqE1S5s6z7jB-QFvbxsOkbQW3tFVFWSF2PnWngpOtAJXiA-JrtKbXmu9JO4hGodAdWAlWcVv6sh7A9MWLmi9j_zxb50pn2TupFjCf8B7c568CMgN3rLhbYwyo9pPEyQ22OWNVjPq0EitC2I7AAvl2WkmfKpQmmOJLMF5iXr3JODUbmcy6O9CsZzDK7oUYTkQRKjRCboBojxBxOKxK8GE6tplrrbXEJ08K9dOgbAiTc4BrIYVSK2kXdefA_ZSCghC0s2D3GB0r3);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.grid-overlay {
+  background-image: radial-gradient(circle, #000 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.05;
+}
+
+.soft-shadow {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.loota-icon-wiggle:hover {
+  animation: loota-wiggle 520ms ease-in-out;
+}
+
+.loota-footstep {
+  animation: loota-footstep 720ms ease-in-out infinite;
+  transform-origin: center;
+  opacity: 0.4;
+}
+
+.loota-sos {
+  animation: loota-sos-beep 2400ms ease-in-out infinite;
+}
+
+.loota-scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.loota-scrollbar-hidden::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@keyframes loota-wiggle {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  15% {
+    transform: translateY(-2px) rotate(-7deg);
+  }
+  30% {
+    transform: translateY(-2px) rotate(7deg);
+  }
+  45% {
+    transform: translateY(-2px) rotate(-6deg);
+  }
+  60% {
+    transform: translateY(-2px) rotate(5deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+@keyframes loota-footstep {
+  0% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.95);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.06);
+  }
+  70% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.95);
+  }
+  100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.95);
+  }
+}
+
+@keyframes loota-sos-beep {
+  0% {
+    opacity: 0.35;
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.15);
+  }
+  55% {
+    opacity: 0.4;
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.15);
+  }
+  70% {
+    opacity: 1;
+    box-shadow:
+      0 10px 22px rgba(239, 68, 68, 0.35),
+      0 0 0 6px rgba(239, 68, 68, 0.12);
+  }
+  85% {
+    opacity: 0.55;
+    box-shadow: 0 10px 20px rgba(239, 68, 68, 0.22);
+  }
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.15);
+  }
+}
+
+/* Broadcast: constraint/stop pill pulse so it reads like in-app STOP panel */
+@keyframes broadcast-pill-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  }
+  50% {
+    opacity: 0.92;
+    box-shadow: 0 2px 14px rgba(180, 83, 9, 0.5);
+  }
+}
+
+@keyframes broadcast-pill-pulse-sos {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 2px 10px rgba(220, 38, 38, 0.4);
+  }
+  50% {
+    opacity: 0.92;
+    box-shadow: 0 2px 16px rgba(220, 38, 38, 0.6);
+  }
+}
+
+/* Hide Mapbox locator after first successful use in a hunt (one use per hunt; new hunt = show again) */
+.hunts-locator-hidden .mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}
+
+/* Tablet/short viewport: keep map from being cut off — use small viewport height so map fits on screen and stays at top */
+.hunts-map-viewport {
+  top: 0 !important;
+}
+@media (max-height: 1024px) {
+  .hunts-map-viewport {
+    height: 100svh !important;
+    min-height: 100svh !important;
+    max-height: 100svh !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .map-bg {
+    background-image: linear-gradient(rgba(22, 24, 29, 0.92), rgba(22, 24, 29, 0.92)),
+      url(https://lh3.googleusercontent.com/aida-public/AB6AXuBVqtNqE1S5s6z7jB-QFvbxsOkbQW3tFVFWSF2PnWngpOtAJXiA-JrtKbXmu9JO4hGodAdWAlWcVv6sh7A9MWLmi9j_zxb50pn2TupFjCf8B7c568CMgN3rLhbYwyo9pPEyQ22OWNVjPq0EitC2I7AAvl2WkmfKpQmmOJLMF5iXr3JODUbmcy6O9CsZzDK7oUYTkQRKjRCboBojxBxOKxK8GE6tplrrbXEJ08K9dOgbAiTc4BrIYVSK2kXdefA_ZSCghC0s2D3GB0r3);
+  }
+
+  .grid-overlay {
+    background-image: radial-gradient(circle, #fff 1px, transparent 1px);
+  }
+}
