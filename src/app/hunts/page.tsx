@@ -2731,9 +2731,9 @@ export default function HuntsPage() {
     if (!map || !mapReady) return;
     if (!playerPos) return;
 
-    const z0 = typeof map.getZoom === "function" ? (map.getZoom() as number) : 5;
-    // Map always boots at Nigeria (~zoom 5). Snap once to the player as soon as we have coords (restore or travel start).
-    if (!initialHuntsCameraSnapRef.current && Number.isFinite(z0) && z0 < 7) {
+    // Snap once to the player as soon as we have coords (restore, GPS, IP fallback, or travel start).
+    // This keeps the hunts map consistently at zoom 14 (street-level).
+    if (!initialHuntsCameraSnapRef.current) {
       initialHuntsCameraSnapRef.current = true;
       const isPlane = travelModeId === "plane";
       const snapZoom = isTraveling && isPlane ? 6.8 : isTraveling ? 14 : 14;

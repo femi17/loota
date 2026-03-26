@@ -2061,8 +2061,19 @@ export default function BroadcastPage() {
         const routeCoords = normalizeTravelRouteCoords(p.travel_route_coords);
         const lastActiveAtMs = parseTimestampMs(p.last_active_at) || parseTimestampMs(p.updated_at);
         const deadlineMs = parseTimestampMs(p.question_deadline_at);
-        // Avatar position always from DB (player_positions.lng/lat). Hunts writes route start when travel starts, current position when at a stop.
-        const canonicalPos = { lng: Number(p.lng), lat: Number(p.lat) };
+        // Avatar position normally comes from DB (player_positions.lng/lat). When unset/invalid (e.g. null, 0,0),
+        // fall back to the hunt region spawn base so "Show all" doesn't drop the player entirely.
+        const rawLng = Number(p.lng);
+        const rawLat = Number(p.lat);
+        const looksUnset = Math.abs(rawLng) < 1e-6 && Math.abs(rawLat) < 1e-6;
+        const looksValid =
+          Number.isFinite(rawLng) &&
+          Number.isFinite(rawLat) &&
+          Math.abs(rawLat) <= 90 &&
+          Math.abs(rawLng) <= 180 &&
+          !looksUnset;
+        const spawn = regionSpawnBaseRef.current;
+        const canonicalPos = looksValid ? { lng: rawLng, lat: rawLat } : { lng: spawn.lng, lat: spawn.lat };
         const mz = p.map_zoom;
         const mw = p.map_width_px;
         return {
@@ -2594,7 +2605,8 @@ export default function BroadcastPage() {
       setMapReady(false);
 
       const initialCenter = view.center;
-      const initialZoom = view.zoom;
+      // Default broadcast zoom: street-level (matches hunts). "Show all" will fit bounds when needed.
+      const initialZoom = DEFAULT_ZOOM;
 
       try {
         const mapboxgl = (await import("mapbox-gl")).default as any;
@@ -2622,18 +2634,8 @@ export default function BroadcastPage() {
             }
           };
           bumpResize();
-          // Initial hunt-area frame only when not following one player (ref may be set on remount).
-          if (view.fitBounds && !focusPlayerIdRef.current) {
-            try {
-              map.fitBounds(view.fitBounds, {
-                padding: { top: 64, bottom: 64, left: 64, right: 64 },
-                duration: 0,
-                maxZoom: 9.5,
-              });
-            } catch {
-              /* ignore */
-            }
-          }
+          // Do not auto-fit to the hunt region on load; we want a consistent zoom-14 default.
+          // The "Show all" camera loop will keep everyone visible once player markers arrive.
           // Flex layout often finalises after first paint — without this, canvas can stay 0×0 or gray (no tiles).
           requestAnimationFrame(() => {
             bumpResize();
