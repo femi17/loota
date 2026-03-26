@@ -53,6 +53,7 @@ export default function CreateHuntPage() {
   const [loading, setLoading] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [paystackMode, setPaystackMode] = useState<"free" | "paid">("free");
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -219,7 +220,7 @@ export default function CreateHuntPage() {
           hunt_location: formData.huntLocation.trim() || null,
           region_name: config.regionName?.trim() || null,
           waypoints: waypointCount > 0 ? waypoints : null,
-          pricing_config: config.pricing,
+          pricing_config: { ...config.pricing, paystackMode },
           question_categories: config.questionCategories,
           difficulty_distribution: config.difficultyDistribution,
           briefing: config.briefing,
@@ -340,6 +341,42 @@ export default function CreateHuntPage() {
                 <span className="material-symbols-outlined text-xl">emoji_events</span>
                 Prize & Winners
               </h2>
+
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
+                  Paystack mode
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaystackMode("free")}
+                    className={[
+                      "px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest border transition-colors",
+                      paystackMode === "free"
+                        ? "bg-[#0F172A] text-white border-[#0F172A]"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+                    ].join(" ")}
+                  >
+                    Free
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaystackMode("paid")}
+                    className={[
+                      "px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest border transition-colors",
+                      paystackMode === "paid"
+                        ? "bg-[#0F172A] text-white border-[#0F172A]"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+                    ].join(" ")}
+                  >
+                    Paid
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Free uses <span className="font-mono">NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY</span> / <span className="font-mono">PAYSTACK_SECRET_KEY</span>. Paid uses{" "}
+                  <span className="font-mono">PAID_PAYSTACK_PUBLIC_KEY</span> / <span className="font-mono">PAID_PAYSTACK_SECRET_KEY</span>.
+                </p>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>

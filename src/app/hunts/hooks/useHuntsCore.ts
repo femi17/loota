@@ -174,8 +174,8 @@ function readConstraintPendingForQuizBlock(
   }
 }
 
-/** Return type is intentionally `any` so the page can destructure 200+ values without a giant interface; hook is internal to hunts. */
-export function useHuntsCore(): any {
+/** Internal hook for hunts page state; return type is inferred from the returned object. */
+export function useHuntsCore() {
   const tokenPresent = Boolean(MAPBOX_TOKEN);
   const youName = "Cipher_Player";
   const taskSeedRef = useRef<number>(0);
@@ -1559,6 +1559,6 @@ export function useHuntsCore(): any {
     youMarkerIsAmbulanceRef, huntDestinationAfterHospitalRef, bicycleFaintRef, positionRealtimeRef, isTravelingRef,
     travellingHasStartedThisHuntRef, travelSyncPosRef, wasTravelingForBroadcastRef, travelBroadcastPayloadRef, narratorStateRef, lastArrivalAtRef,
     ARRIVAL_REALTIME_IGNORE_MS, travelStartedAtRef, TRAVEL_START_REALTIME_IGNORE_MS,
-  } as any;
+  };
 };
 

@@ -705,11 +705,12 @@ export function HuntsStatusDrawerContent({
             {(() => {
               const stepNumber = publicTaskStepNumber;
               const stepIndex = 0;
+              const catId = taskCategoryForStep(stepNumber);
               const catLabel =
                 questionCategories?.length &&
                 questionCategories[stepIndex % questionCategories.length]
                   ? questionCategories[stepIndex % questionCategories.length]
-                  : TASK_CATEGORY_LABEL[taskCategoryForStep(stepNumber)] ?? "quiz";
+                  : TASK_CATEGORY_LABEL[catId] ?? "quiz";
               const secondsLeft = publicTaskDeadlineMs
                 ? Math.max(0, Math.ceil((publicTaskDeadlineMs - clock) / 1000))
                 : TASK_TIME_SECONDS;
@@ -796,7 +797,7 @@ export function HuntsStatusDrawerContent({
                             if (res) {
                               setPublicTaskQuestion({
                                 id: "ai-public-0",
-                                category: catLabel,
+                                category: catId,
                                 prompt: res.prompt,
                                 answers: res.options ?? [],
                               });
@@ -1059,11 +1060,12 @@ export function HuntsStatusDrawerContent({
               const next = demoUnlockTasks[idx]?.next ?? null;
               const stepNumber = unlockCheckpoint?.stepNumber ?? Math.max(2, keys + 1);
               const stepIndex = keys;
+              const catId = taskCategoryForStep(stepNumber);
               const catLabel =
                 questionCategories?.length &&
                 questionCategories[stepIndex % questionCategories.length]
                   ? questionCategories[stepIndex % questionCategories.length]
-                  : TASK_CATEGORY_LABEL[taskCategoryForStep(stepNumber)] ?? "quiz";
+                  : TASK_CATEGORY_LABEL[catId] ?? "quiz";
               const attempt = unlockTaskAttempt;
               const secondsLeft = unlockTaskDeadlineMs
                 ? Math.max(0, Math.ceil((unlockTaskDeadlineMs - clock) / 1000))
@@ -1150,7 +1152,7 @@ export function HuntsStatusDrawerContent({
                             if (res) {
                               setUnlockTaskQuestion({
                                 id: `ai-unlock-${idx}`,
-                                category: catLabel,
+                                category: catId,
                                 prompt: res.prompt,
                                 answers: res.options ?? [],
                               });

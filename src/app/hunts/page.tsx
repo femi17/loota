@@ -140,12 +140,13 @@ import { useHuntData } from "./useHuntData";
 import { useHuntsCore } from "./hooks/useHuntsCore";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-const PAYSTACK_PUBLIC_KEY = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY ?? "";
+const PAYSTACK_PUBLIC_KEY_FREE = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY ?? "";
+const PAYSTACK_PUBLIC_KEY_PAID = process.env.PAID_PAYSTACK_PUBLIC_KEY ?? "";
 const CONSTRAINT_PENDING_KEY = "loota_constraint_to_stop";
 const HOSPITAL_PENDING_KEY = "loota_hospital_pending";
 
 export default function HuntsPage() {
-  const core = useHuntsCore();
+  const core: ReturnType<typeof useHuntsCore> = useHuntsCore();
   const {
     tokenPresent, youName, getTaskSeed, user, profile, refreshProfile, updateCredits, credits, setCredits,
     huntersHunting, setHuntersHunting, otherDeviceRole, setOtherDeviceRole, anotherDeviceActive, lightPreset, setLightPreset,
@@ -1744,8 +1745,15 @@ export default function HuntsPage() {
   async function startPaystackPayment(pkg: { coins: number; amountNgn: number }) {
     setPayError(null);
     setPaystackLoading(true);
-    if (!PAYSTACK_PUBLIC_KEY) {
-      setPayError("Missing Paystack public key (NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY).");
+    const mode: "free" | "paid" =
+      (activeHunt as any)?.pricing_config?.paystackMode === "paid" ? "paid" : "free";
+    const key = mode === "paid" ? PAYSTACK_PUBLIC_KEY_PAID : PAYSTACK_PUBLIC_KEY_FREE;
+    if (!key) {
+      setPayError(
+        mode === "paid"
+          ? "Missing Paystack public key (PAID_PAYSTACK_PUBLIC_KEY)."
+          : "Missing Paystack public key (NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY).",
+      );
       setPaystackLoading(false);
       return;
     }
@@ -1760,7 +1768,7 @@ export default function HuntsPage() {
       if (!ok) throw new Error("Paystack did not load");
       const PaystackPop = (window as any).PaystackPop;
       PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY,
+        key,
         ref,
         email: user?.email ?? "player@loota.game",
         amount: pkg.amountNgn * 100, // kobo
@@ -1769,6 +1777,7 @@ export default function HuntsPage() {
           custom_fields: [
             { display_name: "Coins", variable_name: "coins", value: pkg.coins },
             { display_name: "User", variable_name: "user_id", value: user.id },
+            { display_name: "Mode", variable_name: "paystack_mode", value: mode },
           ],
         },
         callback: function () {
@@ -1777,7 +1786,7 @@ export default function HuntsPage() {
               const res = await fetch("/api/wallet/add-coins", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reference: ref }),
+                body: JSON.stringify({ reference: ref, paystackMode: mode }),
               });
               const data = await res.json().catch(() => ({}));
               if (res.ok) {
@@ -1820,7 +1829,7 @@ export default function HuntsPage() {
     });
     if (item.id === "bicycle" || item.id === "motorbike" || item.id === "car") {
       const id = item.id as VehicleId;
-      setVehicleState((prev) => ({
+      setVehicleState((prev: any) => ({
         ...prev,
         [id]: { healthPct: 100, warnedLow: false, status: "ok" },
       }));
@@ -1864,7 +1873,7 @@ export default function HuntsPage() {
       6_000,
       Math.round((MAINT_WORLD_SECONDS * 1000) / MAINT_SPEEDUP),
     );
-    setVehicleState((prev) => ({
+    setVehicleState((prev: any) => ({
       ...prev,
       [id]: { ...prev[id], status: "servicing", untilMs: now + realMs },
     }));
@@ -3243,7 +3252,6 @@ export default function HuntsPage() {
       nextBusStopAtKm: modeId === "bus" ? BUS_STOP_EVERY_KM : undefined,
       startedAt: now,
       durationMs,
-      gameDurationMs,
       lastTickAt: now,
     };
     // Lock avatar + camera to route start before isTraveling flips (avoids null playerPos while DB restore is skipped).
@@ -3821,7 +3829,7 @@ export default function HuntsPage() {
               nextThresholdKind,
               constraintKind: sf?.kind ?? null,
               constraintStatus: sf?.status ?? null,
-              constraintStopName: sf?.stop?.name ?? null,
+              constraintStopName: sf?.stop?.place_name ?? null,
               destinationLabel: destinationLabel || null,
             };
           }
@@ -3859,7 +3867,7 @@ export default function HuntsPage() {
                 
                 // Calculate final wear with all factors
                 const wear = deltaKm * baseWearRate * speedFactor * healthFactor * roadFactor;
-                setVehicleState((prev) => {
+                setVehicleState((prev: any) => {
                   const cur = prev[vId];
                   if (!cur || cur.status !== "ok") return prev;
                   const nextPct = Math.max(0, cur.healthPct - wear);
@@ -6120,7 +6128,7 @@ export default function HuntsPage() {
             ? (hospitalStay != null
                 ? (hospitalStay.costCoins > 0 ? `Pay ${formatCoins(hospitalStay.costCoins)}` : "Go")
                 : (stopFlow?.costCoins ?? 0) > 0
-                  ? `Pay ${formatCoins(stopFlow.costCoins ?? 0)}`
+                  ? `Pay ${formatCoins(stopFlow?.costCoins ?? 0)}`
                   : "Go")
             : null
         }
@@ -6195,7 +6203,7 @@ export default function HuntsPage() {
                     if (!next || !playerPos) return;
                     if (bikeFaint) {
                       if (!bikeFaint.wasRental) {
-                        setVehicleState((prev) => ({
+                        setVehicleState((prev: any) => ({
                           ...prev,
                           bicycle: {
                             ...prev.bicycle,
@@ -6425,7 +6433,7 @@ export default function HuntsPage() {
                   // Bicycle was left at the scene (ambulance doesn't take the bike). So they don't have it at the hospital — let them choose how to continue.
                   if (bikeFaint) {
                     if (!bikeFaint.wasRental) {
-                      setVehicleState((prev) => ({
+                      setVehicleState((prev: any) => ({
                         ...prev,
                         bicycle: {
                           ...prev.bicycle,

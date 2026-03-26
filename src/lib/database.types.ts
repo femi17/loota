@@ -34,6 +34,8 @@ export type Hunt = {
     rentCost: { bicycle: number; motorbike: number; car: number; bus: number };
     busFare: number;
     planeFare: number;
+    /** Which Paystack keys to use for wallet top-ups during this hunt. */
+    paystackMode?: "free" | "paid";
   };
   question_categories: string[];
   difficulty_distribution: { easy: number; medium: number; hard: number };

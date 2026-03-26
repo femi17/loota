@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { AppFooter } from "@/components/AppFooter";
@@ -162,6 +162,28 @@ async function upsertPlayerPositionOnRegister(
 }
 
 export default function LobbyPage() {
+  return (
+    <Suspense
+      fallback={
+        <AuthGuard>
+          <div className="min-h-screen flex flex-col bg-white text-[#0F172A] antialiased">
+            <AppHeaderWithAuth active="lobby" />
+            <main className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#0F172A]"></div>
+                <p className="mt-4 text-sm text-slate-600">Loading lobby...</p>
+              </div>
+            </main>
+          </div>
+        </AuthGuard>
+      }
+    >
+      <LobbyPageInner />
+    </Suspense>
+  );
+}
+
+function LobbyPageInner() {
   const { user: authUser, profile: authProfile } = useAuth();
   const [activeHunt, setActiveHunt] = useState<Hunt | null>(null);
   const [registrations, setRegistrations] = useState<HuntRegistration[]>([]);

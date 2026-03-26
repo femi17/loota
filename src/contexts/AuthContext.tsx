@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           table: "player_profiles",
           filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
+        (payload: { new: unknown }) => {
           const row = payload.new as Record<string, unknown>;
           if (row && typeof row === "object") setProfile(row as any);
         }

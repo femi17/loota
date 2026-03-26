@@ -14,7 +14,6 @@ import {
   type RegionMapView,
 } from "@/lib/region-map-view";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { addMapboxTrafficLayer } from "@/lib/mapbox-traffic-layer";
 
 type LngLat = { lng: number; lat: number };
 
@@ -326,14 +325,18 @@ function applyBroadcastShowAllPlanToMap(
       });
       return;
     }
-    const bounds = new mapboxModule.LngLatBounds!();
-    plan.positions.forEach((p) => bounds.extend([p.lng, p.lat]));
-    const fitMaxZoom = Math.min(maxZoom, SHOW_ALL_CLUSTER_FIT_MAX_ZOOM);
-    map.fitBounds(bounds, {
-      padding,
-      duration: durationMs,
-      maxZoom: fitMaxZoom,
-    });
+    if (plan.kind === "fit") {
+      const LngLatBounds = mapboxModule?.LngLatBounds;
+      if (!LngLatBounds) return;
+      const bounds = new LngLatBounds();
+      plan.positions.forEach((p) => bounds.extend([p.lng, p.lat]));
+      const fitMaxZoom = Math.min(maxZoom, SHOW_ALL_CLUSTER_FIT_MAX_ZOOM);
+      map.fitBounds(bounds, {
+        padding,
+        duration: durationMs,
+        maxZoom: fitMaxZoom,
+      });
+    }
   } catch {
     /* ignore */
   }
@@ -1733,11 +1736,10 @@ export default function BroadcastPage() {
           .eq("hunt_id", huntId);
         if (!regRowsErr && regRows?.length) {
           const havePos = new Set(posData.map((p) => String(p.player_id)));
-          const missing: string[] = [
-            ...new Set(
-              regRows.map((r: { player_id: string }) => String(r.player_id)).filter(Boolean)
-            ),
-          ].filter((id) => Boolean(id) && !havePos.has(id));
+          const regIds = (regRows as Array<{ player_id: unknown }>).map((r) =>
+            String(r?.player_id ?? "").trim()
+          ).filter(Boolean);
+          const missing = Array.from(new Set(regIds)).filter((id) => !havePos.has(id));
           if (missing.length > 0) {
             const { data: profs } = await supabase
               .from("player_profiles")
@@ -2620,11 +2622,6 @@ export default function BroadcastPage() {
 
         map.on("load", () => {
           if (cancelled) return;
-          try {
-            addMapboxTrafficLayer(map);
-          } catch {
-            /* traffic tileset optional */
-          }
           const bumpResize = () => {
             try {
               map.resize();

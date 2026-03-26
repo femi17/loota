@@ -36,7 +36,8 @@ function sanitizeMeta(meta: Record<string, unknown> | undefined): Record<string,
 
 function safeErrorShape(err: unknown): Record<string, unknown> {
   if (err instanceof Error) {
-    return { name: err.name, code: (err as Record<string, unknown>).code };
+    const rec = err as unknown as Record<string, unknown>;
+    return { name: err.name, code: rec.code };
   }
   return { type: typeof err };
 }
@@ -95,7 +96,7 @@ export const logger = {
   error(context: string, message: string, meta?: Record<string, unknown> & { err?: unknown }): void {
     const safe = meta?.err !== undefined ? { ...meta, err: safeErrorShape(meta.err) } : meta;
     write("error", context, message, safe);
-    captureFor500(meta?.err, context);
+    captureFor500(meta?.err);
   },
   warn(context: string, message: string, meta?: Record<string, unknown>): void {
     write("warn", context, message, meta);

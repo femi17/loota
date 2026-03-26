@@ -231,7 +231,7 @@ export function HuntsConstraintDrawerContent({
             </div>
           ) : stopFlow?.status === "to_stop" &&
             stopFlow?.stop &&
-            (stopFlow?.coordsToStop?.length > 0 || stopFlow?.restInPlace) ? (
+            ((stopFlow?.coordsToStop?.length ?? 0) > 0 || stopFlow?.restInPlace) ? (
             <div className="p-5 rounded-3xl bg-white border border-[#F1F5F9]">
               {showKeepGoingWarning ? (
                 <>

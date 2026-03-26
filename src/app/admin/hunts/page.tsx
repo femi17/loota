@@ -7,6 +7,26 @@ import { AppHeader } from "@/components/AppHeader";
 import Link from "next/link";
 import type { Hunt } from "@/lib/database.types";
 
+type HuntWinnerRow = {
+  hunt_id: string;
+  player_id: string;
+  won_at: string;
+  keys_earned: number | null;
+  keys_required: number | null;
+};
+
+type PlayerProfileRow = {
+  user_id: string;
+  username: string | null;
+  email?: string | null;
+};
+
+type PlayerPositionNameRow = {
+  hunt_id: string;
+  player_id: string;
+  player_name: string | null;
+};
+
 export default function AdminHuntsPage() {
   const router = useRouter();
   const [hunts, setHunts] = useState<Hunt[]>([]);
@@ -57,9 +77,10 @@ export default function AdminHuntsPage() {
         if (error) {
           console.error("Error loading hunts:", error);
         } else if (data) {
-          setHunts(data);
+          const huntsData = data as Hunt[];
+          setHunts(huntsData);
 
-          const huntIds = data.map((h) => h.id);
+          const huntIds = huntsData.map((h) => h.id);
           if (huntIds.length > 0) {
             const { data: winnersData, error: winnersError } = await supabase
               .from("hunt_winners")
@@ -68,7 +89,8 @@ export default function AdminHuntsPage() {
               .order("won_at", { ascending: true });
 
             if (!winnersError && winnersData) {
-              const playerIds = Array.from(new Set(winnersData.map((w: any) => String(w.player_id))));
+              const winners = winnersData as HuntWinnerRow[];
+              const playerIds = Array.from(new Set(winners.map((w) => String(w.player_id))));
               let namesByPlayerId: Record<string, { name?: string | null; email?: string | null }> = {};
               // Prefer the in-hunt display name snapshot (player_positions.player_name) so admin sees the actual Loota username used in that hunt.
               const namesByHuntAndPlayer: Record<string, string> = {};
@@ -79,7 +101,7 @@ export default function AdminHuntsPage() {
                   .in("hunt_id", huntIds)
                   .in("player_id", playerIds);
                 if (positionNames) {
-                  for (const row of positionNames as any[]) {
+                  for (const row of positionNames as unknown as PlayerPositionNameRow[]) {
                     const hid = String(row.hunt_id ?? "");
                     const pid = String(row.player_id ?? "");
                     const name = typeof row.player_name === "string" ? row.player_name.trim() : "";
@@ -94,24 +116,27 @@ export default function AdminHuntsPage() {
                   .select("user_id, username, email")
                   .in("user_id", playerIds);
                 if (profiles) {
-                  namesByPlayerId = profiles.reduce((acc: Record<string, { name?: string | null; email?: string | null }>, p: any) => {
-                    acc[String(p.user_id)] = {
-                      name: typeof p.username === "string" ? p.username : null,
-                      email: typeof p.email === "string" ? p.email : null,
-                    };
-                    return acc;
-                  }, {});
+                  namesByPlayerId = (profiles as unknown as PlayerProfileRow[]).reduce(
+                    (acc, p) => {
+                      acc[String(p.user_id)] = {
+                        name: typeof p.username === "string" ? p.username : null,
+                        email: typeof p.email === "string" ? p.email : null,
+                      };
+                      return acc;
+                    },
+                    {} as Record<string, { name?: string | null; email?: string | null }>,
+                  );
                 }
               }
 
-              const grouped = winnersData.reduce((acc: Record<string, Array<{
+              const grouped = winners.reduce((acc: Record<string, Array<{
                 player_id: string;
                 won_at: string;
                 keys_earned: number | null;
                 keys_required: number | null;
                 player_name?: string | null;
                 player_email?: string | null;
-              }>>, w: any) => {
+              }>>, w) => {
                 const hid = String(w.hunt_id);
                 const pid = String(w.player_id);
                 if (!acc[hid]) acc[hid] = [];
@@ -138,7 +163,7 @@ export default function AdminHuntsPage() {
     checkAuth();
   }, [router]);
 
-  async function updateHuntStatus(huntId: string, status: string) {
+  async function updateHuntStatus(huntId: string, status: Hunt["status"]) {
     if (!supabase) {
       alert("Supabase is not configured yet. This is a skeleton view.");
       return;
@@ -152,7 +177,7 @@ export default function AdminHuntsPage() {
     if (error) {
       alert("Failed to update hunt status");
     } else {
-      setHunts((prev) => prev.map((h) => (h.id === huntId ? { ...h, status: status as any } : h)));
+      setHunts((prev) => prev.map((h) => (h.id === huntId ? { ...h, status } : h)));
     }
   }
 

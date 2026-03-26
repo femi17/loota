@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server-auth";
 import { checkRequestBodySize } from "@/lib/request-utils";
 
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
+const PAYSTACK_SECRET_FREE = process.env.PAYSTACK_SECRET_KEY ?? "";
+const PAYSTACK_SECRET_PAID = process.env.PAID_PAYSTACK_SECRET_KEY ?? "";
 /** Kobo per coin. 50 = 0.5 NGN per coin (N1000 → 2000 coins, N2500 → 5000, N5000 → 10000). */
 const KOBOS_PER_COIN = Math.max(1, Number(process.env.PAYSTACK_KOBOS_PER_COIN) || 50);
 
@@ -39,14 +40,14 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { supabase, user } = auth;
 
-  if (!PAYSTACK_SECRET) {
+  if (!PAYSTACK_SECRET_FREE && !PAYSTACK_SECRET_PAID) {
     return NextResponse.json({ error: "Payment verification not configured" }, { status: 503 });
   }
 
   const sizeCheck = checkRequestBodySize(request);
   if (sizeCheck) return sizeCheck;
 
-  let body: { reference?: string };
+  let body: { reference?: string; paystackMode?: "free" | "paid" | string };
   try {
     body = await request.json();
   } catch {
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest) {
   const reference = typeof body?.reference === "string" ? body.reference.trim() : "";
   if (!reference) {
     return NextResponse.json({ error: "reference is required" }, { status: 400 });
+  }
+
+  const mode = body?.paystackMode === "paid" ? "paid" : "free";
+  const PAYSTACK_SECRET = mode === "paid" ? PAYSTACK_SECRET_PAID : PAYSTACK_SECRET_FREE;
+  if (!PAYSTACK_SECRET) {
+    return NextResponse.json(
+      { error: mode === "paid" ? "Paid Paystack not configured" : "Paystack not configured" },
+      { status: 503 }
+    );
   }
 
   const verifyRes = await fetch(

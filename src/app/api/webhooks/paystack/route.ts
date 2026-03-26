@@ -3,7 +3,8 @@ import crypto from "crypto";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
+const PAYSTACK_SECRET_FREE = process.env.PAYSTACK_SECRET_KEY ?? "";
+const PAYSTACK_SECRET_PAID = process.env.PAID_PAYSTACK_SECRET_KEY ?? "";
 /** Kobo per coin. 50 = 0.5 NGN per coin (N1000 → 2000 coins, N2500 → 5000, N5000 → 10000). */
 const KOBOS_PER_COIN = Math.max(1, Number(process.env.PAYSTACK_KOBOS_PER_COIN) || 50);
 
@@ -27,8 +28,8 @@ type PaystackEvent = {
  * and record in payment_credits to avoid double-credit.
  */
 export async function POST(request: NextRequest) {
-  if (!PAYSTACK_SECRET) {
-    logger.error("Paystack webhook", "PAYSTACK_SECRET_KEY not set");
+  if (!PAYSTACK_SECRET_FREE && !PAYSTACK_SECRET_PAID) {
+    logger.error("Paystack webhook", "No Paystack webhook secret configured");
     return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
   }
 
@@ -40,10 +41,14 @@ export async function POST(request: NextRequest) {
   }
 
   const signature = request.headers.get("x-paystack-signature") ?? "";
-  const hash = crypto.createHmac("sha512", PAYSTACK_SECRET).update(rawBody).digest("hex");
-  const validSignature =
-    signature.length === hash.length &&
-    crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
+  const secrets = [PAYSTACK_SECRET_FREE, PAYSTACK_SECRET_PAID].filter(Boolean) as string[];
+  const validSignature = secrets.some((secret) => {
+    const hash = crypto.createHmac("sha512", secret).update(rawBody).digest("hex");
+    return (
+      signature.length === hash.length &&
+      crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature))
+    );
+  });
   if (!validSignature) {
     logger.warn("Paystack webhook", "Invalid signature");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });

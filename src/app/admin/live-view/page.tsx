@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
@@ -10,6 +10,23 @@ import { LiveViewContent } from "@/app/live-view/[huntId]/page";
 type HuntRow = { id: string; title: string; status: string };
 
 export default function AdminLiveViewPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-white">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#0F172A]"></div>
+            <p className="mt-4 text-sm text-slate-600">Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <AdminLiveViewInner />
+    </Suspense>
+  );
+}
+
+function AdminLiveViewInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const huntIdParam = searchParams.get("huntId") ?? "";

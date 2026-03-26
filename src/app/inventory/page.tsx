@@ -376,7 +376,7 @@ export default function InventoryPage() {
               const res = await fetch("/api/wallet/add-coins", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reference: ref }),
+                body: JSON.stringify({ reference: ref, paystackMode: "free" }),
               });
               const data = await res.json().catch(() => ({}));
               if (res.ok) {

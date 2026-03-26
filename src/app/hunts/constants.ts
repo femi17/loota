@@ -34,6 +34,7 @@ export const TASK_CATEGORY_LABEL: Record<TaskCategoryId, string> = {
   riddle: "riddle",
   math: "math",
   trivia: "trivia",
+  quiz: "quiz",
 };
 
 export const TASK_BANK: Record<TaskCategoryId, TaskItem[]> = {
@@ -58,6 +59,7 @@ export const TASK_BANK: Record<TaskCategoryId, TaskItem[]> = {
     { id: "t4", category: "trivia", prompt: "What is Nigeria's capital city?", answers: ["abuja"] },
     { id: "t5", category: "trivia", prompt: "Nigeria's currency is called what?", answers: ["naira"] },
   ],
+  quiz: [],
 };
 
 export const WALK_REJUVENATE_EVERY_KM = 4;
