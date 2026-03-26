@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { AppHeaderWithAuth } from "@/components/AppHeaderWithAuth";
+import { AppFooter } from "@/components/AppFooter";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase/client";
 
@@ -447,23 +448,7 @@ export default function Home() {
           </div>
         )}
 
-        <footer className="py-6 px-6 lg:px-12 border-t border-[#F1F5F9] bg-white/80 backdrop-blur-sm flex items-center justify-between">
-          <div className="flex items-center gap-6 lg:gap-8 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            <span>© {new Date().getFullYear()} LOOTA</span>
-            <a className="hover:text-[#0F172A] transition-colors" href="#">
-              Terms
-            </a>
-            <a className="hover:text-[#0F172A] transition-colors" href="#">
-              Privacy
-            </a>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
-            <span className="material-symbols-outlined text-sm text-[#10B981]">verified_user</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              Verified platform
-            </span>
-          </div>
-        </footer>
+        <AppFooter />
       </div>
     </div>
   );
