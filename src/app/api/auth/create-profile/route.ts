@@ -1,9 +1,8 @@
-import { randomInt } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { checkRequestBodySize } from "@/lib/request-utils";
 import { logger } from "@/lib/logger";
-import { formatLootaNumberSuffix } from "@/lib/loota-username";
+import { generateDefaultLootaUsername } from "@/lib/loota-username";
 
 const USERNAME_MAX_LENGTH = 50;
 /** Allowed: letters, digits, spaces, hyphens, underscores, apostrophe (e.g. O'Brien) */
@@ -53,8 +52,7 @@ export async function POST(request: NextRequest) {
       }
       finalUsername = validated.username;
     } else {
-      const n = randomInt(1, 1_000_000_000);
-      finalUsername = `Loota_${formatLootaNumberSuffix(n)}`;
+      finalUsername = generateDefaultLootaUsername();
     }
 
     // Create player profile with avatar and 1000 free coins

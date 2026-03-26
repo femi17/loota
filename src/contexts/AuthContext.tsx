@@ -10,6 +10,7 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
+import { generateDefaultLootaUsername } from "@/lib/loota-username";
 
 type AuthContextValue = {
   user: User | null;
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const avatarUrl = `https://api.dicebear.com/8.x/thumbs/svg?seed=${encodeURIComponent(userId)}`;
           const username =
             authUser?.user_metadata?.username ||
-            `Loota_${Math.random().toString(36).substr(2, 9)}`;
+            generateDefaultLootaUsername();
 
           const { data: newProfile, error: createError } = await supabase
             .from("player_profiles")
