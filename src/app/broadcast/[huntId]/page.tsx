@@ -2732,6 +2732,8 @@ export default function BroadcastPage() {
   const bearingAnchorRef = useRef<Record<string, LngLat>>({});
   const cameraLastCenterRef = useRef<LngLat | null>(null);
   const cameraLastMoveAtRef = useRef<number>(0);
+  /** When the user manually drags/zooms/rotates in Show-all, pause auto-fit so the map doesn't "fight" them. */
+  const showAllUserInteractedAtRef = useRef<number>(0);
   const lastPillActivityRef = useRef<Record<string, AvatarActivity | undefined>>({});
 
   const otherPlayersFeedLines = useMemo(() => {
@@ -2863,6 +2865,11 @@ export default function BroadcastPage() {
     const tick = () => {
       if (focusPlayerIdRef.current) return;
       const now = Date.now();
+      // If user is interacting with the globe, do not auto-fit; it will snap back under their finger.
+      if (now - showAllUserInteractedAtRef.current < 8000) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
       if (now - lastFitAt >= INTERVAL_MS) {
         const list = playersRef.current;
         const skipSingle =
@@ -2935,6 +2942,28 @@ export default function BroadcastPage() {
     const showAllActive = !focusPlayerId && showAllModePreferredRef.current;
     if (showAllActive) {
       enableShowAllControls();
+      // Any direct manipulation should pause the auto-fit loop for a short window.
+      const markInteracted = () => {
+        showAllUserInteractedAtRef.current = Date.now();
+      };
+      try {
+        map.on?.("dragstart", markInteracted);
+        map.on?.("zoomstart", markInteracted);
+        map.on?.("rotatestart", markInteracted);
+        map.on?.("pitchstart", markInteracted);
+      } catch {
+        /* ignore */
+      }
+      return () => {
+        try {
+          map.off?.("dragstart", markInteracted);
+          map.off?.("zoomstart", markInteracted);
+          map.off?.("rotatestart", markInteracted);
+          map.off?.("pitchstart", markInteracted);
+        } catch {
+          /* ignore */
+        }
+      };
     } else {
       disableAllControls();
     }
