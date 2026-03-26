@@ -13,15 +13,10 @@ import { supabase } from "@/lib/supabase/client";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { positionAlongRoute, parseWaypointCoords } from "@/app/hunts/utils";
 import type { LngLat } from "@/app/hunts/types";
-import { NIGERIA_BBOX } from "@/app/hunts/constants";
 import { makeAvatarEl } from "@/app/hunts/mapMarkerFactories";
 import { TRAVEL_MODES } from "@/app/hunts/constants";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-const NIGERIA_BOUNDS: [[number, number], [number, number]] = [
-  [NIGERIA_BBOX[0], NIGERIA_BBOX[1]],
-  [NIGERIA_BBOX[2], NIGERIA_BBOX[3]],
-];
 const DEFAULT_CENTER: LngLat = { lng: 8.5, lat: 9.5 };
 const DEFAULT_ZOOM = 14;
 const AVATAR_COLORS = ["#2563EB", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#06B6D4", "#EF4444"];
@@ -404,7 +399,6 @@ export function LiveViewContent({ huntId, backHref = "/", backLabel = "← Back"
         style: "mapbox://styles/mapbox/streets-v12",
         center: [c.lng, c.lat],
         zoom: DEFAULT_ZOOM,
-        maxBounds: NIGERIA_BOUNDS,
         interactive: false,
       });
       mapRef.current = map;

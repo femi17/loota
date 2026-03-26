@@ -24,7 +24,9 @@ export const PLANE_BOARDING_MINUTES = 10;
 /** Real-time minutes after landing before player can continue (disembarking). */
 export const PLANE_DISEMBARKING_MINUTES = 5;
 export const TASK_TIME_SECONDS = 15;
-export const CHEAT_LOCKED_DESTINATION_MATCH_KM = 12;
+// Anti-cheat should only trigger when the player is effectively "at" a locked waypoint.
+// Using a large radius (e.g. multiple km) causes false positives when consecutive waypoints are near each other.
+export const CHEAT_LOCKED_DESTINATION_MATCH_KM = 0.12;
 export const NIGERIA_BBOX = [2.69, 4.27, 14.68, 13.9] as const;
 /** Lagos metropolitan area for test/demo locations. [minLng, minLat, maxLng, maxLat] */
 export const LAGOS_BBOX = [3.2, 6.35, 3.55, 6.75] as const;

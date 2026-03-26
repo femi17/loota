@@ -1946,12 +1946,9 @@ export default function HuntsPage() {
           // Start with global view focused on Nigeria (whole country visible) before hunt/locator
           center: [8.5, 9.5],
           zoom: 5,
-          // Clamp camera to Nigeria (requested).
-          // [minLng, minLat, maxLng, maxLat]
-          maxBounds: [
-            [2.69, 4.27],
-            [14.68, 13.9],
-          ],
+          // Do not clamp the camera to Nigeria.
+          // Players may join from anywhere in the world before reaching Nigeria; we still
+          // snap the camera to their device position once we have GPS/IP coordinates.
           interactive: false, // players can’t pan/zoom (game rule)
         });
 
@@ -2057,8 +2054,17 @@ export default function HuntsPage() {
               .then((res) => res.json())
               .then((data: { lng?: number; lat?: number }) => {
                 if (cancelled) return;
-                if (Number.isFinite(data?.lng) && Number.isFinite(data?.lat) && isLngLatInNigeria({ lng: data.lng!, lat: data.lat! })) {
-                  setPlayerPos({ lng: data.lng!, lat: data.lat! });
+                const lng = data?.lng;
+                const lat = data?.lat;
+                if (
+                  typeof lng === "number" &&
+                  typeof lat === "number" &&
+                  Number.isFinite(lng) &&
+                  Number.isFinite(lat) &&
+                  Math.abs(lat) <= 90 &&
+                  Math.abs(lng) <= 180
+                ) {
+                  setPlayerPos({ lng: lng!, lat: lat! });
                 }
               })
               .catch(() => {});
@@ -4511,6 +4517,16 @@ export default function HuntsPage() {
             // IMPORTANT: derive from actual hunt waypoint progression (keys), not unlock-task modulo math.
             // This prevents false positives where a valid destination is misidentified as locked.
             const hp = huntPhaseRef.current;
+            const allowedCurrent =
+              hp === "public_task"
+                ? (huntNextLocations[0] ?? null)
+                : clueUnlockedRef.current
+                  ? (() => {
+                      const k = keysRef.current;
+                      // Allowed destination while hunting is waypoint index = keys.
+                      return huntNextLocations[k] ?? null;
+                    })()
+                  : null;
             const lockedNext =
               hp === "public_task"
                 ? (huntNextLocations[1] ?? null)
@@ -4524,7 +4540,11 @@ export default function HuntsPage() {
                   : null;
             if (lockedNext) {
               const d = haversineKm(tr.to, lockedNext.to);
-              if (d <= CHEAT_LOCKED_DESTINATION_MATCH_KM) {
+              // Only treat as cheating when the player is essentially "at" the locked waypoint,
+              // and not merely near it because waypoints are close together in the same area.
+              const farFromAllowed =
+                allowedCurrent ? haversineKm(tr.to, allowedCurrent.to) > Math.max(0.25, CHEAT_LOCKED_DESTINATION_MATCH_KM * 2) : true;
+              if (d <= CHEAT_LOCKED_DESTINATION_MATCH_KM && farFromAllowed) {
                 if (hp === "public_task") {
                   void failPublicTask("cheat");
                 } else {

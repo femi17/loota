@@ -149,11 +149,6 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 /** If player activity is stale beyond this window, freeze broadcast interpolation at the last active instant. */
 const INACTIVE_FREEZE_GRACE_MS = 8000;
 
-// Match hunts page map settings exactly (zoom, style, bounds)
-const NIGERIA_BOUNDS: [[number, number], [number, number]] = [
-  [2.69, 4.27],
-  [14.68, 13.9],
-];
 const DEFAULT_CENTER: LngLat = { lng: 8.5, lat: 9.5 };
 /** Broadcast “show all” / single-player overview when not in tight focus — matches regional feel. */
 const DEFAULT_ZOOM = 14;
@@ -273,9 +268,10 @@ function getBroadcastShowAllCameraPlan(
   const positions = collectBroadcastShowAllPositions(list, lastDisplayed);
   if (positions.length === 0) return { kind: "none" };
   if (positions.length === 1) return { kind: "one", center: positions[0]! };
-  if (maxPairwiseDistanceKm(positions) >= SHOW_ALL_NATIONWIDE_MIN_SPAN_KM) {
-    return { kind: "nationwide" };
-  }
+  // If anyone is outside Nigeria, a fixed Nigeria-centered "nationwide" frame
+  // will keep remote players off-screen.
+  if (positions.some((p) => !isLngLatInNigeria(p))) return { kind: "fit", positions };
+  if (maxPairwiseDistanceKm(positions) >= SHOW_ALL_NATIONWIDE_MIN_SPAN_KM) return { kind: "nationwide" };
   const regionalHunt =
     huntRegionView &&
     !regionMapViewIsWholeNigeria(huntRegionView) &&
@@ -2281,15 +2277,12 @@ export default function BroadcastPage() {
     const map = mapRef.current;
     if (!mapReady || !map) return;
     try {
-      if (focusPlayerId) {
-        map.setMaxBounds(null);
-      } else {
-        map.setMaxBounds(NIGERIA_BOUNDS);
-      }
+      // Do not clamp map movement to Nigeria bbox; off-country players must remain visible.
+      map.setMaxBounds(null);
     } catch {
       /* ignore */
     }
-  }, [mapReady, focusPlayerId]);
+  }, [mapReady]);
 
   /** Hunts page gets layout early; broadcast map sits in flex/min-h-0 and often needs resize to fetch tiles. */
   useEffect(() => {
@@ -2614,7 +2607,6 @@ export default function BroadcastPage() {
           center: [initialCenter.lng, initialCenter.lat],
           zoom: initialZoom,
           minZoom: 3.5,
-          maxBounds: NIGERIA_BOUNDS,
           interactive: false,
         });
 
