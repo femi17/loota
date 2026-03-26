@@ -278,19 +278,32 @@ export default function HuntsPage() {
           bikeRecoveryIncluded: Boolean(data.hospitalStay.bikeRecoveryIncluded),
         });
       } else {
-        // If user left during faint/enroute, continue from hospital stay to keep enforcement active.
-        const stayRealMs = (HOSPITAL_STAY_MINUTES * 60 * 1000) / STOP_SPEEDUP;
-        setHospitalStay({
-          startedAt: Date.now(),
-          durationMs: stayRealMs,
-          costCoins: Math.max(0, Number(data.costCoins ?? HOSPITAL_BILL)),
-        });
+        // If user left during faint/enroute, keep hospital enforcement active.
+        // Crucially: when status is "enroute", we MUST restore the enroute guard so travel completion
+        // cannot be reinterpreted as arriving at a quiz waypoint.
+        if (data.status === "enroute") {
+          travellingToHospitalRef.current = true;
+          setIsTravellingToHospital(true);
+        } else {
+          // For "faint" (ambulance on the way) we resume as a hospital stay so the flow can't be bypassed.
+          const stayRealMs = (HOSPITAL_STAY_MINUTES * 60 * 1000) / STOP_SPEEDUP;
+          setHospitalStay({
+            startedAt: Date.now(),
+            durationMs: stayRealMs,
+            costCoins: Math.max(0, Number(data.costCoins ?? HOSPITAL_BILL)),
+          });
+        }
       }
       setDrawer("hospital");
     } catch {
       // ignore invalid storage payload
     }
-  }, [activeHuntId, faintPhase, hospitalStay, isTravellingToHospital, setDrawer, setHospitalStay]);
+  }, [activeHuntId, faintPhase, hospitalStay, isTravellingToHospital, setDrawer, setHospitalStay, setIsTravellingToHospital, travellingToHospitalRef]);
+
+  // Keep the hospital enroute ref in sync with state so reload/restore can't lose the guard.
+  useEffect(() => {
+    travellingToHospitalRef.current = Boolean(isTravellingToHospital);
+  }, [isTravellingToHospital, travellingToHospitalRef]);
 
   function getTravelBroadcastPayloadForDb() {
     const payload = travelBroadcastPayloadRef.current;
