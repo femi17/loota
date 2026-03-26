@@ -16,7 +16,7 @@ export const STREET_QUIZ_CATEGORY_HINTS = [
   "General knowledge (facts, geography, culture, history, science)",
   "Viral & internet trends (Nigeria-focused: memes, slang, creators, what is trending online in Nigeria)",
   "Nigeria culture (music, slang, places, food, celebrities, Afrobeats)",
-  "Riddles (short, satisfying 'what am I?')",
+  "Guess the flag (show a flag image URL and ask the country)",
   "Quick trivia (one-line facts, pop culture)",
   "Word play (puns, fill-in-the-blank)",
   "Music & lyrics (song lines, artist names)",
@@ -156,6 +156,11 @@ Uniqueness: Generate a fresh, original question. Vary the specific sub-topic (e.
 
 CRITICAL - Category scope: The question MUST be solely and clearly about this category. No mixing.
 - For "Simple math" (or "math"): allow variety across basic arithmetic, simple algebra, percentages, fractions, and simple number patterns. Keep it short and solvable mentally; no advanced formulas.
+- For "Guess the flag" (or if the category contains "flag"): you MUST include a single flag image URL from FlagCDN in the question text in this exact format:
+  Flag: https://flagcdn.com/w320/{cc}.png
+  where {cc} is a real ISO 3166-1 alpha-2 lowercase country code (e.g. ng, gh, us, fr).
+  The question must be: "Which country is this flag?" (or equivalent).
+  Options must be 4 country names. The correct answer must be the correct country for that flag and must match one option exactly.
 - For "Geography" (or "cities", "capitals"): ONLY places, capitals, landmarks, countries. The correct answer must be the actual fact (e.g. capital of France = Paris, not Madrid or Rome).
 - For "Viral & internet trends" (or "viral", "internet trends"): ONLY Nigerian internet culture—memes, slang, challenges, creators, hashtags, or platforms as they matter in Nigeria. Do not center US-only or generic Western viral topics unless clearly tied to Nigeria.
 - For any other category: stay strictly within that topic. If the category is "Music", do not ask a geography question.

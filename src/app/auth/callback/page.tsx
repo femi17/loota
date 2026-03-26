@@ -74,6 +74,8 @@ export default function AuthCallbackPage() {
 
         const searchParams = new URLSearchParams(window.location.search);
         const code = searchParams.get("code");
+        const tokenHash = searchParams.get("token_hash");
+        const type = searchParams.get("type");
         const nextRaw = searchParams.get("next") || "/lobby";
         const next =
           typeof nextRaw === "string" &&
@@ -83,11 +85,43 @@ export default function AuthCallbackPage() {
             ? nextRaw
             : "/lobby";
 
+        // 1) PKCE code flow (works when the confirmation link is opened in the same browser
+        // that initiated auth and the verifier is still available).
         if (code) {
           const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
-          if (exchangeError) {
-            setError(exchangeError.message);
+          if (!exchangeError && data.user) {
+            await ensureProfileExists(data.user.id);
+            router.push(next);
+            return;
+          }
+
+          // 2) If PKCE verifier isn't available (common when user opens the email link on a different device),
+          // fall back to token_hash verification if provided by Supabase.
+          const msg = (exchangeError?.message ?? "").toLowerCase();
+          const looksLikePkce =
+            msg.includes("pkce") ||
+            msg.includes("verifier") ||
+            msg.includes("code verifier") ||
+            msg.includes("not found");
+          if (!looksLikePkce) {
+            setError(exchangeError?.message ?? "Authentication failed");
+            setLoading(false);
+            setTimeout(() => router.push("/auth/login"), 3000);
+            return;
+          }
+          // continue to token_hash flow below
+        }
+
+        // 3) Email link verification flow (token_hash + type)
+        if (tokenHash && type) {
+          const { data, error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: type as any,
+          } as any);
+
+          if (verifyError) {
+            setError(verifyError.message);
             setLoading(false);
             setTimeout(() => router.push("/auth/login"), 3000);
             return;

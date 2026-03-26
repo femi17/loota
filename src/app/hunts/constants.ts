@@ -29,22 +29,15 @@ export const NIGERIA_BBOX = [2.69, 4.27, 14.68, 13.9] as const;
 /** Lagos metropolitan area for test/demo locations. [minLng, minLat, maxLng, maxLat] */
 export const LAGOS_BBOX = [3.2, 6.35, 3.55, 6.75] as const;
 
-export const TASK_CATEGORY_ORDER: TaskCategoryId[] = ["riddle", "math", "trivia"];
+export const TASK_CATEGORY_ORDER: TaskCategoryId[] = ["math", "trivia", "flags"];
 export const TASK_CATEGORY_LABEL: Record<TaskCategoryId, string> = {
-  riddle: "riddle",
   math: "math",
   trivia: "trivia",
+  flags: "flags",
   quiz: "quiz",
 };
 
 export const TASK_BANK: Record<TaskCategoryId, TaskItem[]> = {
-  riddle: [
-    { id: "r1", category: "riddle", prompt: "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?", answers: ["echo", "an echo"] },
-    { id: "r2", category: "riddle", prompt: "The more you take, the more you leave behind. What are they?", answers: ["footsteps", "steps"] },
-    { id: "r3", category: "riddle", prompt: "I have cities, but no houses. I have mountains, but no trees. I have water, but no fish. What am I?", answers: ["map", "a map"] },
-    { id: "r4", category: "riddle", prompt: "I'm tall when I'm young and I'm short when I'm old. What am I?", answers: ["candle", "a candle"] },
-    { id: "r5", category: "riddle", prompt: "What has keys but can't open locks?", answers: ["keyboard", "a keyboard"] },
-  ],
   math: [
     { id: "m1", category: "math", prompt: "Compute: 47 × 13", answers: ["611"] },
     { id: "m2", category: "math", prompt: "Compute: 9³ + 6²", answers: ["765"] },
@@ -58,6 +51,13 @@ export const TASK_BANK: Record<TaskCategoryId, TaskItem[]> = {
     { id: "t3", category: "trivia", prompt: "In what year did Nigeria return to democratic rule (Fourth Republic)?", answers: ["1999"] },
     { id: "t4", category: "trivia", prompt: "What is Nigeria's capital city?", answers: ["abuja"] },
     { id: "t5", category: "trivia", prompt: "Nigeria's currency is called what?", answers: ["naira"] },
+  ],
+  flags: [
+    { id: "f1", category: "flags", prompt: "Flag: https://flagcdn.com/w320/ng.png\nWhich country is this flag?", answers: ["nigeria"] },
+    { id: "f2", category: "flags", prompt: "Flag: https://flagcdn.com/w320/gh.png\nWhich country is this flag?", answers: ["ghana"] },
+    { id: "f3", category: "flags", prompt: "Flag: https://flagcdn.com/w320/za.png\nWhich country is this flag?", answers: ["south africa", "southafrica"] },
+    { id: "f4", category: "flags", prompt: "Flag: https://flagcdn.com/w320/fr.png\nWhich country is this flag?", answers: ["france"] },
+    { id: "f5", category: "flags", prompt: "Flag: https://flagcdn.com/w320/us.png\nWhich country is this flag?", answers: ["united states", "usa", "us"] },
   ],
   quiz: [],
 };

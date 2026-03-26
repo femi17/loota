@@ -257,28 +257,14 @@ Target Spend Per User drives everything. From it, determine in this order:
 
 2. Number of keys to win: MUST equal numberOfHunts (one key per location). We will set keysToWin = numberOfHunts.
 
-3. Question categories: Return exactly numberOfHunts categories—one per location. Use street-quiz / viral interview style: quick, punchy, one-sentence questions that are fun to answer and share. Each category must be from this list (no repeating until you have used many):
-   - Simple math (simple algebra only: solve for x, evaluate expressions with one variable)
-   - General knowledge (accessible facts, world, culture)
-   - Viral & internet trends (Nigeria-focused: memes, slang, creators, what is trending online in Nigeria)
-   - Nigeria culture (music, slang, places, food, celebrities)
-   - Riddles (short, satisfying "what am I?")
-   - Quick trivia (one-line facts, pop culture)
-   - Word play (puns, fill-in-the-blank, word puzzles)
-   - Music & lyrics (song lines, artist names, Afrobeats)
-   - Sports (football, Olympics, fun facts)
-   - Food & drink (dishes, ingredients)
-   - Movies & TV (quotes, characters, Nollywood)
-   - Logic puzzles (simple deductive)
-   - Number games (sequences, what comes next)
-   - Nature & animals (fun facts)
-   - Geography (cities, landmarks, capitals)
-   - Acronyms & abbreviations (CEO, WWW, H2O—like "Are You Smarter Than a Fifth Grader" style)
-   - Celebrities & names (who said it, who's this?)
-   - Slang & phrases (street talk, local expressions)
-   - Fill in the blank (complete the phrase/song)
-   - This or that (quick which-one choices)
-   Use a wide spread: do not return the same category twice in a row; avoid repeating until you have used at least 10 different ones. Every category must be one of the above (exact name or clear variant). Mix should feel fresh and varied so players stay excited at each stop.
+3. Question categories: Return exactly numberOfHunts categories—one per location. Categories MUST be chosen from this list:
+   - Simple math
+   - General knowledge
+   - Guess the flag
+   Rules:
+   - Do not use riddles.
+   - Use a wide spread: avoid repeating the same category twice in a row when possible.
+   - "Guess the flag" should appear sometimes, not at every step.
 
 4. Where the hunt takes place (locations drive spending: travel, rent, bus, plane, refuel, rest):
    - Host chose: ${singleState ? `Single state = "${singleState}". Locations will be chosen automatically from random Local Government Areas (LGAs) within ${singleState}. Return regionName as "${singleState}". Do NOT return startLocationQuery or waypointQueries—we will assign LGA-based locations server-side.` : "Nationwide. You may spread waypoints across different states. Pick a start state and location, then distribute waypoints across states. Return regionName as \"Nigeria\" or \"Nationwide\". Return startLocationQuery and waypointQueries: array of exactly numberOfHunts strings, each in \"Place, State, Nigeria\" format."}

@@ -5635,7 +5635,7 @@ export default function HuntsPage() {
     : faintPhase || isTravellingToHospital
       ? "Ambulance"
       : arrivedForChallenge && !isTraveling
-        ? "Answer riddle"
+        ? "Answer quiz"
         : yourCurrentModeId === "walk"
           ? "Walking"
           : hudDisplayMode.label;

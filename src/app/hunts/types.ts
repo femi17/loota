@@ -20,7 +20,7 @@ export type DrawerId =
 
 export type LightPreset = "dawn" | "day" | "dusk" | "night";
 
-export type TaskCategoryId = "riddle" | "math" | "trivia" | "quiz";
+export type TaskCategoryId = "math" | "trivia" | "flags" | "quiz";
 export type TaskStage = "intro" | "active";
 export type TaskItem = { id: string; category: TaskCategoryId; prompt: string; answers: string[] };
 
