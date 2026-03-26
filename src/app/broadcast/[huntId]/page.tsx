@@ -2619,7 +2619,10 @@ export default function BroadcastPage() {
           center: [initialCenter.lng, initialCenter.lat],
           zoom: initialZoom,
           minZoom: 3.5,
-          interactive: false,
+          // Interactivity is toggled dynamically:
+          // - "Show all": allow pan/zoom/rotate (globe)
+          // - Focused player: lock map so camera logic matches the spotlight
+          interactive: true,
         });
 
         mapRef.current = map;
@@ -2878,6 +2881,64 @@ export default function BroadcastPage() {
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   }, [mapReady, focusPlayerId, regionMapView]);
+
+  // Map interactivity:
+  // - Only interactive in "Show all on map" mode (no focused player).
+  // - When interactive, use globe projection and allow rotation (bearing changes).
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const enableShowAllControls = () => {
+      try {
+        map.dragPan?.enable?.();
+        map.scrollZoom?.enable?.();
+        map.boxZoom?.enable?.();
+        map.doubleClickZoom?.enable?.();
+        map.keyboard?.enable?.();
+        map.touchZoomRotate?.enable?.();
+        map.dragRotate?.enable?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        // Globe projection + fog are supported on Mapbox GL JS v2+; no-op if unavailable.
+        map.setProjection?.("globe");
+        map.setFog?.({});
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const disableAllControls = () => {
+      try {
+        map.dragPan?.disable?.();
+        map.scrollZoom?.disable?.();
+        map.boxZoom?.disable?.();
+        map.doubleClickZoom?.disable?.();
+        map.keyboard?.disable?.();
+        map.touchZoomRotate?.disable?.();
+        map.dragRotate?.disable?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        // Keep default projection when locked to reduce visual changes while spotlighting.
+        map.setProjection?.("mercator");
+        map.setFog?.(null);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const showAllActive = !focusPlayerId && showAllModePreferredRef.current;
+    if (showAllActive) {
+      enableShowAllControls();
+    } else {
+      disableAllControls();
+    }
+  }, [mapReady, focusPlayerId]);
 
   // Snap camera to all on-map avatars when entering "Show all" (immediate feedback).
   useEffect(() => {

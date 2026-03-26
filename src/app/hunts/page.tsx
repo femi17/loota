@@ -2936,25 +2936,53 @@ export default function HuntsPage() {
     to: LngLat,
     profile: "walking" | "cycling" | "driving",
   ) {
-    const url = new URL("/api/mapbox/directions", window.location.origin);
-    url.searchParams.set("fromLng", String(from.lng));
-    url.searchParams.set("fromLat", String(from.lat));
-    url.searchParams.set("toLng", String(to.lng));
-    url.searchParams.set("toLat", String(to.lat));
-    url.searchParams.set("profile", profile);
-    const res = await fetch(url.toString());
-    const json = await res.json();
-    if (!res.ok) throw new Error(json?.error || "Directions failed");
-    const coords = Array.isArray(json.coordinates)
-      ? (json.coordinates as Array<[number, number]>)
-      : [];
-    const durationSeconds = Number(json.durationSeconds);
-    const distanceMeters = Number(json.distanceMeters);
-    return {
-      coords,
-      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : NaN,
-      distanceMeters: Number.isFinite(distanceMeters) ? distanceMeters : NaN,
+    const fetchDirections = async (p: "walking" | "cycling" | "driving") => {
+      const url = new URL("/api/mapbox/directions", window.location.origin);
+      url.searchParams.set("fromLng", String(from.lng));
+      url.searchParams.set("fromLat", String(from.lat));
+      url.searchParams.set("toLng", String(to.lng));
+      url.searchParams.set("toLat", String(to.lat));
+      url.searchParams.set("profile", p);
+      const res = await fetch(url.toString());
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Directions failed");
+      const coords = Array.isArray(json.coordinates)
+        ? (json.coordinates as Array<[number, number]>)
+        : [];
+      const durationSeconds = Number(json.durationSeconds);
+      const distanceMeters = Number(json.distanceMeters);
+      return {
+        coords,
+        durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : NaN,
+        distanceMeters: Number.isFinite(distanceMeters) ? distanceMeters : NaN,
+      };
     };
+
+    // Water-crossing safety:
+    // If walking directions fail or return unusable geometry (common near lagoons/creeks),
+    // retry with driving (still `exclude=ferry` in the API route) so Mapbox routes via bridges/roads.
+    try {
+      const out = await fetchDirections(profile);
+      const ok =
+        Array.isArray(out.coords) &&
+        out.coords.length >= 2 &&
+        out.coords.every(
+          (pt) =>
+            Array.isArray(pt) &&
+            pt.length >= 2 &&
+            Number.isFinite(pt[0]) &&
+            Number.isFinite(pt[1])
+        );
+      if (profile === "walking" && !ok) {
+        return await fetchDirections("driving");
+      }
+      return out;
+    } catch (e) {
+      if (profile === "walking") {
+        return await fetchDirections("driving");
+      }
+      throw e;
+    }
   }
 
   /** Driving + live traffic + alternate routes (Mapbox). Falls back to caller on failure. */
@@ -4384,30 +4412,16 @@ export default function HuntsPage() {
                       message: "Walking to destination",
                     });
                   } else {
-                    const directCoords: Array<[number, number]> = [
-                      [arrivalPos.lng, arrivalPos.lat],
-                      [finalDest.lng, finalDest.lat],
-                    ];
-                    const distKm = haversineKm(arrivalPos, finalDest);
-                    const walkEta = Math.round((distKm / 5) * 3600); // 5 km/h walking speed
-                    startTravelWithRoute(arrivalPos, finalDest, directCoords, "walk", walkEta);
                     setToast({
-                      title: "Arrived at bus stop",
-                      message: "Walking to destination",
+                      title: "Route unavailable",
+                      message: "Couldn't find a walking path from this bus stop. Move a bit and try again.",
                     });
                   }
                 })
                 .catch(() => {
-                  const directCoords: Array<[number, number]> = [
-                    [arrivalPos.lng, arrivalPos.lat],
-                    [tr.finalDestination!.lng, tr.finalDestination!.lat],
-                  ];
-                  const distKm = haversineKm(arrivalPos, tr.finalDestination!);
-                  const walkEta = Math.round((distKm / 5) * 3600); // 5 km/h walking speed
-                  startTravelWithRoute(arrivalPos, tr.finalDestination!, directCoords, "walk", walkEta);
                   setToast({
-                    title: "Arrived at bus stop",
-                    message: "Walking to destination",
+                    title: "Route unavailable",
+                    message: "Couldn't find a walking path from this bus stop. Move a bit and try again.",
                   });
                 });
               suppressKeyRef.current = false;
@@ -4456,11 +4470,10 @@ export default function HuntsPage() {
                   }
                 })
                 .catch(() => {
-                  const directCoords: Array<[number, number]> = [[tr.to.lng, tr.to.lat], [returnTo.lng, returnTo.lat]];
-                  const distKm = haversineKm(tr.to, returnTo);
-                  const walkEta = Math.round((distKm / 5) * 3600);
-                  startTravelWithRoute(tr.to, returnTo, directCoords, "walk", walkEta);
-                  setToast({ title: "Got fuel", message: "Walking back to your vehicle." });
+                  setToast({
+                    title: "Route unavailable",
+                    message: "Couldn't find a walking path back to your vehicle. Move slightly and try again.",
+                  });
                 });
               suppressKeyRef.current = false;
               return;
