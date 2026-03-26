@@ -33,7 +33,7 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // 1) Rate limit at edge (distributed when Upstash Redis is configured)
   const rateLimitRes = await checkRateLimitByIp(request, {
     prefix: "middleware:global",
@@ -62,9 +62,7 @@ export async function middleware(request: NextRequest) {
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options)
-        );
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
         response = applySecurityHeaders(response);
       },
     },
@@ -80,10 +78,7 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/broadcast")) {
     if (!user) {
       const redirectUrl = new URL("/auth/login", request.url);
-      redirectUrl.searchParams.set(
-        "redirect",
-        pathname + (request.nextUrl.search ?? "")
-      );
+      redirectUrl.searchParams.set("redirect", pathname + (request.nextUrl.search ?? ""));
       const redirect = NextResponse.redirect(redirectUrl);
       applySecurityHeaders(redirect);
       return redirect;
@@ -111,16 +106,11 @@ export async function middleware(request: NextRequest) {
     return redirect;
   }
 
-  if (
-    (pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup")) &&
-    user
-  ) {
+  if ((pathname.startsWith("/auth/login") || pathname.startsWith("/auth/signup")) && user) {
     const redirectParam = request.nextUrl.searchParams.get("redirect");
     // Only allow same-origin paths (prevent open-redirect)
     const safePath =
-      redirectParam?.startsWith("/") &&
-      !redirectParam.startsWith("//") &&
-      !redirectParam.includes("\\")
+      redirectParam?.startsWith("/") && !redirectParam.startsWith("//") && !redirectParam.includes("\\")
         ? redirectParam
         : "/lobby";
     const redirect = NextResponse.redirect(new URL(safePath, request.url));
@@ -132,7 +122,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };
+
