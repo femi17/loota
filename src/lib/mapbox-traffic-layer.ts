@@ -75,7 +75,8 @@ export function addMapboxTrafficLayer(map: MinimalMap): void {
       "line-cap": "round",
     },
     paint: {
-      "line-opacity": 0.85,
+      // Slightly lower base opacity so traffic reads as context, not a second “route”.
+      "line-opacity": 0.72,
       "line-width": [
         "interpolate",
         ["linear"],
@@ -91,6 +92,8 @@ export function addMapboxTrafficLayer(map: MinimalMap): void {
         18,
         7,
       ],
+      // “low” = free-flowing traffic (Mapbox). Keep it a soft, light green so it doesn’t
+      // compete with hunt routes (#16A34A / dashed preview) which are intentionally vivid.
       "line-color": [
         "case",
         ["==", ["get", "closed"], "yes"],
@@ -105,7 +108,7 @@ export function addMapboxTrafficLayer(map: MinimalMap): void {
           "moderate",
           "#F9A825",
           "low",
-          "#2E7D32",
+          "#C8E6C9",
           "#9E9E9E",
         ],
       ],
