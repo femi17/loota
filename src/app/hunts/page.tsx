@@ -1957,7 +1957,7 @@ export default function HuntsPage() {
           // Do not clamp the camera to Nigeria.
           // Players may join from anywhere in the world before reaching Nigeria; we still
           // snap the camera to their device position once we have GPS/IP coordinates.
-          // Handlers default off in load; we enable pan/zoom only when a route is visible so players can explore the path (position is still not editable).
+          // Handlers default off in load; pan/zoom are enabled for the active hunt so players can explore before and during travel (avatar position is unchanged).
           interactive: true,
         });
 
@@ -1988,7 +1988,7 @@ export default function HuntsPage() {
               source: "main-travel-route",
               layout: { "line-join": "round", "line-cap": "round" },
               paint: {
-                "line-color": "#0D9488",
+                "line-color": "#16A34A",
                 "line-width": 4,
                 "line-opacity": 0.92,
               },
@@ -2001,9 +2001,12 @@ export default function HuntsPage() {
               source: "main-travel-route",
               layout: {
                 "symbol-placement": "line",
-                "symbol-spacing": 72,
+                "symbol-spacing": 56,
                 "text-field": "▶",
-                "text-size": 13,
+                "text-size": 14,
+                "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
                 "text-keep-upright": false,
                 "text-rotation-alignment": "map",
                 "text-pitch-alignment": "viewport",
@@ -2011,12 +2014,62 @@ export default function HuntsPage() {
               },
               paint: {
                 "text-color": "#ffffff",
-                "text-halo-color": "#0D9488",
+                "text-halo-color": "#15803d",
                 "text-halo-width": 2,
               },
             });
           }
-          // Blue line for rejuvenate/refuel/rest detour so Loota can see the suggested route
+          // Planned route (Travel drawer / pending destination) before tapping Go — same green styling as active leg.
+          if (!map.getSource("preview-travel-route")) {
+            map.addSource("preview-travel-route", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates: [] },
+              },
+            });
+          }
+          if (!map.getLayer("preview-travel-route-line")) {
+            map.addLayer({
+              id: "preview-travel-route-line",
+              type: "line",
+              source: "preview-travel-route",
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: {
+                "line-color": "#16A34A",
+                "line-width": 4,
+                "line-opacity": 0.85,
+                "line-dasharray": [2, 2],
+              },
+            });
+          }
+          if (!map.getLayer("preview-travel-route-direction")) {
+            map.addLayer({
+              id: "preview-travel-route-direction",
+              type: "symbol",
+              source: "preview-travel-route",
+              layout: {
+                "symbol-placement": "line",
+                "symbol-spacing": 56,
+                "text-field": "▶",
+                "text-size": 14,
+                "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
+                "text-keep-upright": false,
+                "text-rotation-alignment": "map",
+                "text-pitch-alignment": "viewport",
+                visibility: "none",
+              },
+              paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#15803d",
+                "text-halo-width": 2,
+              },
+            });
+          }
+          // Detour to stop (relax) or hospital — line + chevrons on top
           if (!map.getSource("detour-route")) {
             map.addSource("detour-route", {
               type: "geojson",
@@ -2034,7 +2087,7 @@ export default function HuntsPage() {
               source: "detour-route",
               layout: { "line-join": "round", "line-cap": "round" },
               paint: {
-                "line-color": "#2563EB",
+                "line-color": "#16A34A",
                 "line-width": 4,
               },
             });
@@ -2047,9 +2100,12 @@ export default function HuntsPage() {
               source: "detour-route",
               layout: {
                 "symbol-placement": "line",
-                "symbol-spacing": 72,
+                "symbol-spacing": 56,
                 "text-field": "▶",
-                "text-size": 13,
+                "text-size": 14,
+                "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
                 "text-keep-upright": false,
                 "text-rotation-alignment": "map",
                 "text-pitch-alignment": "viewport",
@@ -2057,7 +2113,7 @@ export default function HuntsPage() {
               },
               paint: {
                 "text-color": "#ffffff",
-                "text-halo-color": "#2563EB",
+                "text-halo-color": "#15803d",
                 "text-halo-width": 2,
               },
             });
@@ -2121,21 +2177,14 @@ export default function HuntsPage() {
     }
   }, [lightPreset, mapReady]);
 
-  // When a path is shown (detour/hospital preview or active travel), allow pan/scroll to inspect the route; pause follow after user input.
+  // During an active hunt, allow pan/zoom anytime so players can scout the map before Go and along routes; pause camera follow after user input.
   const ROUTE_EXPLORE_PAUSE_MS = 8000;
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
 
-    const showDetour =
-      (stopFlow?.status === "to_stop" &&
-        (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest") &&
-        !stopFlow?.restInPlace) ||
-      isTravellingToHospital;
-    const detourLineVisible = showDetour && routeCoords.length >= 2;
-    const travelExplore = Boolean(isTraveling && !isTravellingToHospital);
-    const allowExplore = detourLineVisible || travelExplore;
+    const allowExplore = Boolean(activeHuntId && huntFetchDone);
 
     const markExploreInteraction = () => {
       huntsRouteExplorePauseAtRef.current = Date.now();
@@ -2184,15 +2233,7 @@ export default function HuntsPage() {
       /* ignore */
     }
     return;
-  }, [
-    mapReady,
-    isTraveling,
-    isTravellingToHospital,
-    routeCoords.length,
-    stopFlow?.status,
-    stopFlow?.kind,
-    stopFlow?.restInPlace,
-  ]);
+  }, [mapReady, activeHuntId, huntFetchDone]);
 
   // Main travel polyline + direction chevrons (active leg only; not ambulance/hospital).
   useEffect(() => {
@@ -2242,7 +2283,8 @@ export default function HuntsPage() {
       properties: {},
       geometry: { type: "LineString", coordinates },
     });
-    const lineColor = isTravellingToHospital ? "#DC2626" : "#2563EB";
+    const lineColor = isTravellingToHospital ? "#DC2626" : "#16A34A";
+    const haloColor = isTravellingToHospital ? "#DC2626" : "#15803d";
     try {
       map.setPaintProperty("detour-route-line", "line-color", lineColor);
     } catch {
@@ -2254,7 +2296,7 @@ export default function HuntsPage() {
         "visibility",
         coordinates.length >= 2 ? "visible" : "none",
       );
-      map.setPaintProperty("detour-route-direction", "text-halo-color", lineColor);
+      map.setPaintProperty("detour-route-direction", "text-halo-color", haloColor);
     } catch {
       /* layer may not exist yet */
     }
@@ -5153,6 +5195,72 @@ export default function HuntsPage() {
     if (modeId === "bus") return baseDirs.driving;
     return undefined;
   }
+
+  // Green dashed preview polyline for the selected mode in Travel (before Go); clears while moving or in ambulance leg.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource("preview-travel-route") as
+      | { setData: (data: GeoJSON.Feature<GeoJSON.LineString>) => void }
+      | undefined;
+    if (!source?.setData) return;
+
+    if (isTraveling || isTravellingToHospital) {
+      source.setData({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: [] },
+      });
+      try {
+        map.setLayoutProperty("preview-travel-route-direction", "visibility", "none");
+      } catch {
+        /* layer may not exist yet */
+      }
+      return;
+    }
+
+    let coords: Array<[number, number]> = [];
+    const planningTrip =
+      Boolean(pendingDestination || drawer === "travel" || destForDirs) &&
+      (playerPos != null || routeCoords.length >= 2);
+    if (planningTrip) {
+      const picked = modeRoute(travelPickModeId);
+      if (picked?.coords && picked.coords.length >= 2) {
+        coords = picked.coords;
+      } else if (routeCoords.length >= 2) {
+        coords = routeCoords;
+      }
+    }
+
+    source.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: coords },
+    });
+    try {
+      map.setLayoutProperty(
+        "preview-travel-route-direction",
+        "visibility",
+        coords.length >= 2 ? "visible" : "none",
+      );
+    } catch {
+      /* layer may not exist yet */
+    }
+  }, [
+    mapReady,
+    isTraveling,
+    isTravellingToHospital,
+    drawer,
+    travelPickModeId,
+    drivingRouteChoice,
+    pendingDestination,
+    routeCoords,
+    playerPos,
+    destForDirs,
+    baseDirs.walking,
+    baseDirs.cycling,
+    baseDirs.driving,
+  ]);
 
   /** Find nearest bus stop to the given coordinates. */
   async function findNearestBusStop(to: LngLat): Promise<LngLat | null> {
