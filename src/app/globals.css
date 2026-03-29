@@ -161,11 +161,6 @@ body {
   }
 }
 
-/* Hide Mapbox locator after first successful use in a hunt (one use per hunt; new hunt = show again) */
-.hunts-locator-hidden .mapboxgl-ctrl-bottom-right {
-  display: none !important;
-}
-
 /* Tablet/short viewport: keep map from being cut off — use small viewport height so map fits on screen and stays at top */
 .hunts-map-viewport {
   top: 0 !important;

@@ -151,7 +151,7 @@ export default function HuntsPage() {
     tokenPresent, youName, getTaskSeed, user, profile, refreshProfile, updateCredits, credits, setCredits,
     huntersHunting, setHuntersHunting, otherDeviceRole, setOtherDeviceRole, anotherDeviceActive, lightPreset, setLightPreset,
     mapContainerRef, mapRef, mapboxRef, youMarkerRef, lastCameraEaseAtRef, prevMovePosRef, lastMoveBearingRef,
-    activeHuntIdRef, huntHasStartedRef, setLocatorUsedThisHuntRef, mapReady, setMapReady, locatorUsedThisHunt, setLocatorUsedThisHunt,
+    activeHuntIdRef, huntHasStartedRef, mapReady, setMapReady,
     drawer, setDrawer, resumeDrawerRef, navNotifications, setNavNotifications, shopError, setShopError, payError, setPayError,
     paystackLoading, setPaystackLoading, huntLeaderboard, setHuntLeaderboard, leaderboardLoading, setLeaderboardLoading,
     initialCreditsRef, activeHunt, setActiveHunt, activeHuntId, setActiveHuntId, isRegisteredForHunt, secondsUntilStart,
@@ -173,7 +173,7 @@ export default function HuntsPage() {
     unlockCheckpoint, setUnlockCheckpoint, relocationCountdown, setRelocationCountdown, locationQuizFailMessage, setLocationQuizFailMessage,
     unlockRetry, setUnlockRetry, publicInitRef, arrivedForChallenge, setArrivedForChallenge, arrivalChallengeIntro, setArrivalChallengeIntro,
     clueUnlocked, setClueUnlocked, rps, setRps, rpsAwardedRef, keysRef, keysPrevRef, huntPhaseRef, clueUnlockedRef, unlockRetryRef,
-    setDestinationLabelSafe, arrivalActionRef, suppressKeyRef, initialPositionFromDbRef, boardingFlightStartRef,
+    setDestinationLabelSafe, arrivalActionRef, suppressKeyRef, boardingFlightStartRef,
     searchQuery, setSearchQuery, searchLoading, setSearchLoading, searchError, setSearchError, searchResults, setSearchResults,
     clueQuery, setClueQuery, clueLoading, setClueLoading, clueError, setClueError, clueResults, setClueResults,
     searchAbortRef, searchDebounceRef, clueAbortRef, clueDebounceRef, prevDrawerRef,
@@ -197,16 +197,12 @@ export default function HuntsPage() {
     winnersCount: number | null;
   } | null>(null);
   const [completionConfettiVisible, setCompletionConfettiVisible] = useState(false);
-  /** True when we auto-triggered geolocate this mount; used to skip first event after restore so we don't overwrite DB position. */
-  const didAutoTriggerThisLoadRef = useRef(false);
-  /** Mapbox GeolocateControl instance — auto-trigger runs in an effect after hunt data is ready (avoids firing while huntHasStarted is still false during fetch). */
-  const geolocateControlRef = useRef<{ trigger: () => void } | null>(null);
-  /** One auto geolocate per map mount when pre-hunt and no position yet. */
-  const initialGeolocateDoneRef = useRef(false);
   /** After remount, map starts at Nigeria zoom 5 — jump camera once when we first get a real position (avoids stuck country view). */
   const initialHuntsCameraSnapRef = useRef(false);
   /** Travel camera throttling (same idea as broadcast): RAF + route time, not setPlayerPos (250ms). */
   const huntsTravelCameraLastMoveAtRef = useRef(0);
+  /** While a route is shown or during travel, user may pan/zoom; pause auto-follow so the camera does not fight them. */
+  const huntsRouteExplorePauseAtRef = useRef(0);
 
   // Persist hospital/faint enforcement so reload/navigation cannot bypass required action/payment.
   useEffect(() => {
@@ -378,7 +374,6 @@ export default function HuntsPage() {
   // Core state is from useHuntsCore(); keep refs in sync for code below that reads them
   activeHuntIdRef.current = activeHuntId;
   huntHasStartedRef.current = huntHasStarted;
-  setLocatorUsedThisHuntRef.current = setLocatorUsedThisHunt;
 
   // After restore: when user has passed waypoints (keys >= 1) and is in hunt phase with no destination set, suggest the next waypoint so the first one isn’t shown.
   useEffect(() => {
@@ -1956,13 +1951,14 @@ export default function HuntsPage() {
           container: mapContainerRef.current,
           // Use streets-v12 for reliable tile loading; Standard can show blank/dark if config or token limits apply
           style: "mapbox://styles/mapbox/streets-v12",
-          // Start with global view focused on Nigeria (whole country visible) before hunt/locator
+          // Start with global view focused on Nigeria (whole country visible) before first real position
           center: [8.5, 9.5],
           zoom: 5,
           // Do not clamp the camera to Nigeria.
           // Players may join from anywhere in the world before reaching Nigeria; we still
           // snap the camera to their device position once we have GPS/IP coordinates.
-          interactive: false, // players can’t pan/zoom (game rule)
+          // Handlers default off in load; we enable pan/zoom only when a route is visible so players can explore the path (position is still not editable).
+          interactive: true,
         });
 
         mapRef.current = map;
@@ -1973,6 +1969,52 @@ export default function HuntsPage() {
             addMapboxTrafficLayer(map);
           } catch {
             /* traffic tileset optional */
+          }
+          // Active hunt leg (Go / resume): line + chevrons under detour layers so stop/hospital preview stays on top.
+          if (!map.getSource("main-travel-route")) {
+            map.addSource("main-travel-route", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates: [] },
+              },
+            });
+          }
+          if (!map.getLayer("main-travel-route-line")) {
+            map.addLayer({
+              id: "main-travel-route-line",
+              type: "line",
+              source: "main-travel-route",
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: {
+                "line-color": "#0D9488",
+                "line-width": 4,
+                "line-opacity": 0.92,
+              },
+            });
+          }
+          if (!map.getLayer("main-travel-route-direction")) {
+            map.addLayer({
+              id: "main-travel-route-direction",
+              type: "symbol",
+              source: "main-travel-route",
+              layout: {
+                "symbol-placement": "line",
+                "symbol-spacing": 72,
+                "text-field": "▶",
+                "text-size": 13,
+                "text-keep-upright": false,
+                "text-rotation-alignment": "map",
+                "text-pitch-alignment": "viewport",
+                visibility: "none",
+              },
+              paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#0D9488",
+                "text-halo-width": 2,
+              },
+            });
           }
           // Blue line for rejuvenate/refuel/rest detour so Loota can see the suggested route
           if (!map.getSource("detour-route")) {
@@ -1997,92 +2039,43 @@ export default function HuntsPage() {
               },
             });
           }
-          // Mapbox GeolocateControl: longer timeout for tablets (GPS can be slow); error handling so spinner doesn’t hang
-          const geolocate = new mapboxgl.GeolocateControl({
-            positionOptions: {
-              enableHighAccuracy: true,
-              timeout: 25000,
-              maximumAge: 10000,
-            },
-            // false: do not start continuous tracking on add (was firing location flow on every return)
-            trackUserLocation: false,
-            showUserHeading: true,
-            showUserLocation: false,
-          });
-          map.addControl(geolocate, "bottom-right");
-          geolocateControlRef.current = geolocate;
-          geolocate.on("geolocate", (e: { coords: { longitude: number; latitude: number } }) => {
-            if (cancelled) return;
-            // If user is already travelling, only hide the locator; do not overwrite position (travel is source of truth)
-            if (isTravelingRef.current) {
-              if (huntHasStartedRef.current && activeHuntIdRef.current) {
-                try {
-                  window.localStorage.setItem(`loota_locator_used_${activeHuntIdRef.current}`, "1");
-                } catch {}
-                setLocatorUsedThisHuntRef.current?.(true);
-              }
-              return;
+          // Chevrons along the detour/hospital line so travel direction is obvious when panning the map.
+          if (!map.getLayer("detour-route-direction")) {
+            map.addLayer({
+              id: "detour-route-direction",
+              type: "symbol",
+              source: "detour-route",
+              layout: {
+                "symbol-placement": "line",
+                "symbol-spacing": 72,
+                "text-field": "▶",
+                "text-size": 13,
+                "text-keep-upright": false,
+                "text-rotation-alignment": "map",
+                "text-pitch-alignment": "viewport",
+                visibility: "none",
+              },
+              paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#2563EB",
+                "text-halo-width": 2,
+              },
+            });
+          }
+          const disableHuntsMapExploreHandlers = () => {
+            try {
+              map.dragPan?.disable?.();
+              map.scrollZoom?.disable?.();
+              map.touchZoomRotate?.disable?.();
+              map.doubleClickZoom?.disable?.();
+              map.boxZoom?.disable?.();
+              map.keyboard?.disable?.();
+              map.dragRotate?.disable?.();
+            } catch {
+              /* ignore */
             }
-            // After travelling has started this hunt, never overwrite with GPS — user stays at stop/quiz location
-            if (travellingHasStartedThisHuntRef.current) {
-              if (huntHasStartedRef.current && activeHuntIdRef.current) {
-                try {
-                  window.localStorage.setItem(`loota_locator_used_${activeHuntIdRef.current}`, "1");
-                } catch {}
-                setLocatorUsedThisHuntRef.current?.(true);
-              }
-              return;
-            }
-            // After auto-trigger we restore position from DB; skip overwriting so user stays at saved position.
-            // (When hunt has started we don't auto-trigger, so any geolocate = manual tap — allow update.)
-            if (didAutoTriggerThisLoadRef.current && initialPositionFromDbRef.current) {
-              didAutoTriggerThisLoadRef.current = false;
-              initialPositionFromDbRef.current = false;
-              return;
-            }
-            const lng = e.coords.longitude;
-            const lat = e.coords.latitude;
-            setPlayerPos({ lng, lat });
-            setLocationIsApproximate(false);
-            if (activeHuntIdRef.current) {
-              try {
-                window.localStorage.setItem(`loota_locator_used_${activeHuntIdRef.current}`, "1");
-              } catch {}
-              setLocatorUsedThisHuntRef.current?.(true);
-            }
-          });
-          geolocate.on("error", (e: { code?: number; message?: string }) => {
-            if (cancelled) return;
-            setLocationIsApproximate(true);
-            const code = e?.code ?? 0;
-            if (code === 1) {
-              setToast({ title: "Location denied", message: "Allow location access in browser or device settings, then tap the locator again." });
-            } else if (code === 3) {
-              setToast({ title: "Location timed out", message: "Tap the locator again. For better results, try near a window or outdoors." });
-            } else {
-              setToast({ title: "Location unavailable", message: "Tap the locator to try again. Ensure location is on in device settings." });
-            }
-            // Fallback: set approximate position from IP so user can still use the hunt (avoids being stuck at default location).
-            fetch("/api/user/approximate-location")
-              .then((res) => res.json())
-              .then((data: { lng?: number; lat?: number }) => {
-                if (cancelled) return;
-                const lng = data?.lng;
-                const lat = data?.lat;
-                if (
-                  typeof lng === "number" &&
-                  typeof lat === "number" &&
-                  Number.isFinite(lng) &&
-                  Number.isFinite(lat) &&
-                  Math.abs(lat) <= 90 &&
-                  Math.abs(lng) <= 180
-                ) {
-                  setPlayerPos({ lng: lng!, lat: lat! });
-                }
-              })
-              .catch(() => {});
-          });
-          // Auto geolocate is deferred to useEffect below so huntHasStarted / restore are correct (map "load" can run before hunt fetch finishes).
+          };
+          disableHuntsMapExploreHandlers();
           map.resize(); // Ensure map fills container (fixes blank map if container was 0-sized at init)
           setMapReady(true);
         });
@@ -2099,8 +2092,6 @@ export default function HuntsPage() {
 
     return () => {
       cancelled = true;
-      geolocateControlRef.current = null;
-      initialGeolocateDoneRef.current = false;
       initialHuntsCameraSnapRef.current = false;
       try {
         mapRef.current?.remove?.();
@@ -2109,37 +2100,6 @@ export default function HuntsPage() {
       mapboxRef.current = null;
     };
   }, [startLocation.lat, startLocation.lng, tokenPresent]);
-
-  // First-time geolocation only: after hunt metadata is loaded, and only before the hunt starts, if no DB/restored position yet.
-  // Never auto-trigger once huntHasStarted — player_positions restore + travel state is the source of truth (moving or not).
-  useEffect(() => {
-    if (!mapReady || !huntFetchDone || !activeHuntId || !user?.id) return;
-    const ctrl = geolocateControlRef.current;
-    if (!ctrl || initialGeolocateDoneRef.current) return;
-    if (playerPos != null) {
-      initialGeolocateDoneRef.current = true;
-      return;
-    }
-    if (huntHasStarted) {
-      return;
-    }
-    try {
-      const key = `loota_locator_used_${activeHuntId}`;
-      if (typeof window !== "undefined" && window.localStorage.getItem(key) === "1") {
-        initialGeolocateDoneRef.current = true;
-        return;
-      }
-    } catch {
-      /* ignore */
-    }
-    initialGeolocateDoneRef.current = true;
-    didAutoTriggerThisLoadRef.current = true;
-    try {
-      ctrl.trigger();
-    } catch {
-      /* ignore */
-    }
-  }, [mapReady, huntFetchDone, huntHasStarted, activeHuntId, user?.id, playerPos]);
 
   // Update the preset occasionally (in case the user's local time crosses thresholds while playing)
   useEffect(() => {
@@ -2160,6 +2120,109 @@ export default function HuntsPage() {
       // ignore if style/config isn't ready yet
     }
   }, [lightPreset, mapReady]);
+
+  // When a path is shown (detour/hospital preview or active travel), allow pan/scroll to inspect the route; pause follow after user input.
+  const ROUTE_EXPLORE_PAUSE_MS = 8000;
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const showDetour =
+      (stopFlow?.status === "to_stop" &&
+        (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest") &&
+        !stopFlow?.restInPlace) ||
+      isTravellingToHospital;
+    const detourLineVisible = showDetour && routeCoords.length >= 2;
+    const travelExplore = Boolean(isTraveling && !isTravellingToHospital);
+    const allowExplore = detourLineVisible || travelExplore;
+
+    const markExploreInteraction = () => {
+      huntsRouteExplorePauseAtRef.current = Date.now();
+    };
+
+    if (allowExplore) {
+      try {
+        map.dragPan?.enable?.();
+        map.scrollZoom?.enable?.();
+        map.touchZoomRotate?.enable?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        map.on?.("dragstart", markExploreInteraction);
+        map.on?.("zoomstart", markExploreInteraction);
+        map.on?.("rotatestart", markExploreInteraction);
+        map.on?.("pitchstart", markExploreInteraction);
+      } catch {
+        /* ignore */
+      }
+      return () => {
+        try {
+          map.off?.("dragstart", markExploreInteraction);
+          map.off?.("zoomstart", markExploreInteraction);
+          map.off?.("rotatestart", markExploreInteraction);
+          map.off?.("pitchstart", markExploreInteraction);
+        } catch {
+          /* ignore */
+        }
+        try {
+          map.dragPan?.disable?.();
+          map.scrollZoom?.disable?.();
+          map.touchZoomRotate?.disable?.();
+        } catch {
+          /* ignore */
+        }
+      };
+    }
+
+    try {
+      map.dragPan?.disable?.();
+      map.scrollZoom?.disable?.();
+      map.touchZoomRotate?.disable?.();
+    } catch {
+      /* ignore */
+    }
+    return;
+  }, [
+    mapReady,
+    isTraveling,
+    isTravellingToHospital,
+    routeCoords.length,
+    stopFlow?.status,
+    stopFlow?.kind,
+    stopFlow?.restInPlace,
+  ]);
+
+  // Main travel polyline + direction chevrons (active leg only; not ambulance/hospital).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource("main-travel-route") as
+      | { setData: (data: GeoJSON.Feature<GeoJSON.LineString>) => void }
+      | undefined;
+    if (!source?.setData) return;
+
+    const showMainTravel = Boolean(isTraveling && !isTravellingToHospital);
+    const coords =
+      showMainTravel && travelRef.current?.coords && travelRef.current.coords.length >= 2
+        ? travelRef.current.coords
+        : [];
+    source.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: coords },
+    });
+    try {
+      map.setLayoutProperty(
+        "main-travel-route-direction",
+        "visibility",
+        coords.length >= 2 ? "visible" : "none",
+      );
+    } catch {
+      /* layer may not exist yet */
+    }
+  }, [mapReady, isTraveling, isTravellingToHospital, travelPause]);
 
   // Draw route line: red for hospital, blue for relaxation (rejuvenate/refuel/rest)
   useEffect(() => {
@@ -2185,6 +2248,16 @@ export default function HuntsPage() {
     } catch {
       // layer may not exist yet
     }
+    try {
+      map.setLayoutProperty(
+        "detour-route-direction",
+        "visibility",
+        coordinates.length >= 2 ? "visible" : "none",
+      );
+      map.setPaintProperty("detour-route-direction", "text-halo-color", lineColor);
+    } catch {
+      /* layer may not exist yet */
+    }
   }, [mapReady, stopFlow?.status, stopFlow?.kind, routeCoords, isTravellingToHospital]);
 
   // Update markers & route when state changes
@@ -2194,7 +2267,7 @@ export default function HuntsPage() {
     if (!map || !mapReady || !mapboxgl?.Marker) return;
     const Marker = mapboxgl.Marker;
 
-    // Use player position, or neutral Nigeria center until user taps the locator (do not place avatar on first waypoint).
+    // Use player position, or neutral Nigeria center until GPS/join/session gives coords (do not place avatar on first waypoint).
     // When a route is visible (blue line), avatar must be at route start — playerPos can be stale/GPS and miles off.
     const showDetour =
       (stopFlow?.status === "to_stop" &&
@@ -2375,6 +2448,10 @@ export default function HuntsPage() {
       }
 
       const now = Date.now();
+      if (now - huntsRouteExplorePauseAtRef.current < ROUTE_EXPLORE_PAUSE_MS) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
       const lastMoveAt = huntsTravelCameraLastMoveAtRef.current;
       if (lastMoveAt > 0 && now - lastMoveAt < (tr.modeId === "plane" ? CAMERA_PLANE_INTERVAL_MS : CAMERA_INTERVAL_TRAVEL_MS)) {
         rafId = requestAnimationFrame(tick);
@@ -2766,6 +2843,7 @@ export default function HuntsPage() {
     // Idle: gently center on you if available
     if (playerPos) {
       const now = Date.now();
+      if (now - huntsRouteExplorePauseAtRef.current < ROUTE_EXPLORE_PAUSE_MS) return;
       if (now - lastCameraEaseAtRef.current < 650) return;
       lastCameraEaseAtRef.current = now;
 
@@ -3367,7 +3445,7 @@ export default function HuntsPage() {
             hunt_id: activeHuntId,
             player_id: user.id,
             player_name: playerName,
-            // Canonical start: routeCoords[0] (not raw locator), so broadcast + hunts are pixel-aligned.
+            // Canonical start: routeCoords[0], so broadcast + hunts are pixel-aligned.
             lng: routeStart.lng,
             lat: routeStart.lat,
             keys,
@@ -5735,6 +5813,56 @@ export default function HuntsPage() {
         : null;
   const hudPlaneWaitProgressPct = planeWaitStage === "flying" ? hudTravelPct : null;
 
+  const recenterHuntsMap = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let lng: number | undefined;
+    let lat: number | undefined;
+    const marker = youMarkerRef.current as { getLngLat?: () => { lng: number; lat: number } } | null;
+    if (marker && typeof marker.getLngLat === "function") {
+      const ll = marker.getLngLat();
+      lng = ll.lng;
+      lat = ll.lat;
+    } else if (playerPos) {
+      lng = playerPos.lng;
+      lat = playerPos.lat;
+    }
+    if (lng == null || lat == null || !Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
+    huntsRouteExplorePauseAtRef.current = 0;
+    huntsTravelCameraLastMoveAtRef.current = 0;
+    lastCameraEaseAtRef.current = 0;
+
+    const isPlane = Boolean(
+      isTraveling && !isTravellingToHospital && travelRef.current?.modeId === "plane",
+    );
+    const zoom = isPlane ? 6.8 : 14;
+
+    try {
+      if (typeof (map as { stop?: () => void }).stop === "function") {
+        (map as { stop: () => void }).stop();
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      map.easeTo({
+        center: [lng, lat] as [number, number],
+        zoom,
+        duration: 600,
+        bearing: 0,
+        pitch: 0,
+      });
+    } catch {
+      try {
+        map.jumpTo({ center: [lng, lat], zoom, bearing: 0, pitch: 0 });
+      } catch {
+        /* ignore */
+      }
+    }
+    lastCameraEaseAtRef.current = Date.now();
+  }, [playerPos, isTraveling, isTravellingToHospital]);
+
   // No active hunt: show message and redirect to lobby (avoid showing destination/keys)
   if (huntFetchDone && !activeHuntId) {
     return (
@@ -5811,12 +5939,22 @@ export default function HuntsPage() {
                 </div>
               </div>
             ) : (
-              <div className="absolute inset-0">
-                <div
-                  ref={mapContainerRef}
-                  className={`absolute inset-0 w-full h-full ${locatorUsedThisHunt ? "hunts-locator-hidden" : ""}`}
-                />
-              </div>
+              <>
+                <div className="absolute inset-0">
+                  <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+                </div>
+                {mapReady ? (
+                  <button
+                    type="button"
+                    onClick={recenterHuntsMap}
+                    title="Recenter on your position"
+                    aria-label="Recenter map on your current position"
+                    className="absolute bottom-24 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-2xl border border-[#E2E8F0] bg-white/95 text-[#0F172A] shadow-md backdrop-blur-sm transition hover:bg-slate-50 active:scale-[0.97]"
+                  >
+                    <span className="material-symbols-outlined text-[26px]">my_location</span>
+                  </button>
+                ) : null}
+              </>
             )}
 
             {/* Before hunt start: show countdown and message; map and avatars remain visible */}

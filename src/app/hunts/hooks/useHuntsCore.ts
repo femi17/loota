@@ -217,11 +217,8 @@ export function useHuntsCore() {
   const lastMoveBearingRef = useRef<number>(0);
   const activeHuntIdRef = useRef<string | null>(null);
   const huntHasStartedRef = useRef(false);
-  const setLocatorUsedThisHuntRef = useRef<(v: boolean) => void>(() => {});
 
   const [mapReady, setMapReady] = useState(false);
-  /** Once the user uses the locator after the hunt has started, hide it for this hunt (persisted per hunt_id). New hunt = show again. */
-  const [locatorUsedThisHunt, setLocatorUsedThisHunt] = useState(false);
   const [drawer, setDrawer] = useState<DrawerId>(null);
   const resumeDrawerRef = useRef<DrawerId>(null);
   /** Notifications per nav icon: when true, show badge/effect so user checks that panel (e.g. first key, winner key, maintenance, destination ready). */
@@ -313,7 +310,6 @@ export function useHuntsCore() {
 
   activeHuntIdRef.current = activeHuntId;
   huntHasStartedRef.current = huntHasStarted;
-  setLocatorUsedThisHuntRef.current = setLocatorUsedThisHunt;
 
   // Warn when closing/refreshing during an active hunt (cannot block; progress is saved)
   useEffect(() => {
@@ -326,21 +322,6 @@ export function useHuntsCore() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [huntHasStarted]);
-
-  // Sync "locator used this hunt" from localStorage (so after refresh/navigate back we still hide the button)
-  // Check localStorage even before hunt starts — user may have used locator during countdown.
-  useEffect(() => {
-    if (!activeHuntId) {
-      setLocatorUsedThisHunt(false);
-      return;
-    }
-    try {
-      const key = `loota_locator_used_${activeHuntId}`;
-      setLocatorUsedThisHunt(typeof window !== "undefined" && window.localStorage.getItem(key) === "1");
-    } catch {
-      setLocatorUsedThisHunt(false);
-    }
-  }, [activeHuntId]);
 
   const deductCredits = useCallback(
     async (amount: number, huntId?: string | null): Promise<number | null> => {
@@ -539,7 +520,7 @@ export function useHuntsCore() {
   );
   const [travelPickModeId, setTravelPickModeId] = useState<TravelModeId>("walk");
 
-  // Map center: neutral Nigeria only. Never used as the user's position â€“ user position comes only from GPS/locator.
+  // Map center: neutral Nigeria only. Never used as the user's position — exact position comes from join/lobby, DB restore, travel, or session cache.
   const startLocation = useMemo<LngLat>(() => ({ lng: 8.5, lat: 9.5 }), []);
   // First waypoint for public_trip: first waypoint = first quiz location.
   const publicLocation = useMemo<LngLat>(() => {
@@ -567,15 +548,14 @@ export function useHuntsCore() {
     return null;
   }, [huntPhase, keys, keysToWin, publicLocation, huntNextLocations]);
 
-  /** Latest coords for refs (restore vs travel race). Position comes from GPS/locator, DB restore after hunt start, travel ticks, or IP fallback. */
+  /** Latest coords for refs (restore vs travel race). Position comes from join flow, DB restore after hunt start, travel ticks, or session cache. */
   const [playerPos, setPlayerPos] = useState<LngLat | null>(null);
   const playerPosRef = useRef<LngLat | null>(null);
   useEffect(() => {
     playerPosRef.current = playerPos;
   }, [playerPos]);
 
-  /** Persist last known position per hunt so remounting /hunts (or returning from another route) restores the map without tapping the locator again.
-   * Pairs with localStorage `loota_locator_used_*` which suppresses auto-geolocate — without this, that flag left playerPos empty after navigation. */
+  /** Persist last known position per hunt so remounting /hunts (or returning from another route) restores the map without waiting for a refetch. */
   const lastPosSessionKey = activeHuntId ? `loota_last_pos_${activeHuntId}` : null;
   useLayoutEffect(() => {
     if (!lastPosSessionKey) {
@@ -609,7 +589,7 @@ export function useHuntsCore() {
       /* ignore quota / private mode */
     }
   }, [lastPosSessionKey, playerPos]);
-  /** Country from a simple one-time location detect (for context only; exact position is from locator). */
+  /** Country from a simple one-time location detect (for context only). */
   const [userCountry, setUserCountry] = useState<string | null>(null);
   /** True when position is approximate or location failed; show hint to enable location. */
   const [locationIsApproximate, setLocationIsApproximate] = useState(false);
@@ -639,8 +619,6 @@ export function useHuntsCore() {
   const setDestinationLabelSafe = useCallback((label: string) => setDestinationLabel(shortenPlaceLabel(label || "")), []);
   const arrivalActionRef = useRef<null | (() => void)>(null);
   const suppressKeyRef = useRef(false);
-  /** True after we set playerPos from DB on load; geolocate handler skips first overwrite so refresh keeps saved position. */
-  const initialPositionFromDbRef = useRef(false);
   /** Set when entering plane boarding; used by boarding-complete effect to start flight. */
   const boardingFlightStartRef = useRef<{
     playerPos: LngLat;
@@ -1393,7 +1371,7 @@ export function useHuntsCore() {
   const positionRealtimeRef = useRef<ReturnType<ReturnType<typeof supabase.channel>["subscribe"]> | null>(null);
   /** So Realtime callback can see current isTraveling without stale closure. */
   const isTravelingRef = useRef(false);
-  /** Once user has started travelling this hunt, never let geolocate overwrite position (stops/quiz stay in place). */
+  /** Once user has started travelling this hunt, external position updates must not overwrite travel/stop state. */
   const travellingHasStartedThisHuntRef = useRef(false);
   /** Latest position for travel sync interval (avoids stale closure). */
   const travelSyncPosRef = useRef<LngLat | null>(null);
@@ -1446,7 +1424,7 @@ export function useHuntsCore() {
 
   // On load/refresh after hunt has started: restore position (and keys/travel_mode) from DB for this hunt only.
   // We only fetch for current activeHuntId â€” never another hunt or a previous hunt's quiz location.
-  // Before start we do not restore; position comes from geolocate so the user sees current location. After start, refresh puts them back at last saved position (saved continuously as they move, ~2s debounce).
+  // Before start we do not restore from DB the same way; after start, refresh puts them back at last saved position (saved continuously as they move, ~2s debounce).
   useEffect(() => {
     if (!activeHuntId || !user?.id || !supabase) {
       setPlayerPositionsHydrated(true);
@@ -1468,7 +1446,6 @@ export function useHuntsCore() {
         // Only skip DB lng/lat when travel animation already owns a position (slow fetch after Go).
         // If isTraveling but playerPos is still null (e.g. interval not run yet), we MUST apply DB or map stays on Nigeria default.
         if (!(isTravelingRef.current && playerPosRef.current != null) && posOk) {
-          initialPositionFromDbRef.current = true;
           setPlayerPos({ lng, lat });
         }
         if (typeof row.keys === "number" && row.keys >= 0) setKeys(row.keys);
@@ -1522,7 +1499,7 @@ export function useHuntsCore() {
     tokenPresent, youName, getTaskSeed, user, profile, refreshProfile, updateCredits, credits, setCredits,
     huntersHunting, setHuntersHunting, otherDeviceRole, setOtherDeviceRole, anotherDeviceActive, lightPreset, setLightPreset,
     mapContainerRef, mapRef, mapboxRef, youMarkerRef, lastCameraEaseAtRef, prevMovePosRef, lastMoveBearingRef,
-    activeHuntIdRef, huntHasStartedRef, setLocatorUsedThisHuntRef, mapReady, setMapReady, locatorUsedThisHunt, setLocatorUsedThisHunt,
+    activeHuntIdRef, huntHasStartedRef, mapReady, setMapReady,
     drawer, setDrawer, resumeDrawerRef, navNotifications, setNavNotifications, shopError, setShopError, payError, setPayError,
     paystackLoading, setPaystackLoading, huntLeaderboard, setHuntLeaderboard, leaderboardLoading, setLeaderboardLoading,
     initialCreditsRef, activeHunt, setActiveHunt, activeHuntId, setActiveHuntId, isRegisteredForHunt, secondsUntilStart,
@@ -1545,7 +1522,7 @@ export function useHuntsCore() {
     unlockCheckpoint, setUnlockCheckpoint, relocationCountdown, setRelocationCountdown, locationQuizFailMessage, setLocationQuizFailMessage,
     unlockRetry, setUnlockRetry, publicInitRef, arrivedForChallenge, setArrivedForChallenge, arrivalChallengeIntro, setArrivalChallengeIntro,
     clueUnlocked, setClueUnlocked, rps, setRps, rpsAwardedRef, keysRef, keysPrevRef, huntPhaseRef, clueUnlockedRef, unlockRetryRef,
-    setDestinationLabelSafe, arrivalActionRef, suppressKeyRef, initialPositionFromDbRef, boardingFlightStartRef,
+    setDestinationLabelSafe, arrivalActionRef, suppressKeyRef, boardingFlightStartRef,
     searchQuery, setSearchQuery, searchLoading, setSearchLoading, searchError, setSearchError, searchResults, setSearchResults,
     clueQuery, setClueQuery, clueLoading, setClueLoading, clueError, setClueError, clueResults, setClueResults,
     searchAbortRef, searchDebounceRef, clueAbortRef, clueDebounceRef, prevDrawerRef,
