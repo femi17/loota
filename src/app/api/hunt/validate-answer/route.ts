@@ -147,6 +147,11 @@ export async function POST(request: NextRequest) {
   // IMPORTANT: Do NOT update player_positions.keys here. Keys are awarded only by the client
   // when the user clicks Continue (see HuntsStatusDrawerContent). If a DB trigger on
   // question_responses increments keys, run database_keys_single_source.sql to drop it.
+  let responseQuizStreak: number | undefined;
+  let responseStreakBonusCoins: number | undefined;
+  let responseStreakMilestone: number | undefined;
+  let responseNewCredits: number | undefined;
+
   if (huntId && auth.user.id) {
     const questionId = stepIndex !== null ? `step-${stepIndex}` : "unknown";
     const keysEarned = correct ? 1 : 0;
@@ -162,20 +167,37 @@ export async function POST(request: NextRequest) {
     });
 
     // Action feed for broadcast: "Sarah got a key!" / "Mike failed the quiz"
+    const userId = auth.user.id;
     const { data: posRow } = await auth.supabase
       .from("player_positions")
-      .select("player_name")
+      .select("player_name, narrator_state")
       .eq("hunt_id", huntId)
-      .eq("player_id", auth.user.id)
+      .eq("player_id", userId)
       .maybeSingle();
     const playerName = (posRow?.player_name as string) || "Loota";
     await auth.supabase.from("hunt_player_actions").insert({
       hunt_id: huntId,
-      player_id: auth.user.id,
+      player_id: userId,
       player_name: playerName,
       action_type: "quiz_answered",
       payload: { correct, keys_earned: keysEarned, time_taken_seconds: timeTakenSeconds },
     });
+
+    const rawNs = posRow?.narrator_state;
+    const ns: Record<string, unknown> =
+      rawNs && typeof rawNs === "object" && !Array.isArray(rawNs)
+        ? { ...(rawNs as Record<string, unknown>) }
+        : {};
+    const prevStreak = Math.max(0, Math.floor(Number(ns.quiz_answer_streak) || 0));
+    const nextStreak = correct ? prevStreak + 1 : 0;
+    ns.quiz_answer_streak = nextStreak;
+
+    let streakBonusCoins = 0;
+    let streakMilestone: number | null = null;
+    if (correct && (nextStreak === 3 || nextStreak === 5 || nextStreak === 7)) {
+      streakMilestone = nextStreak;
+      streakBonusCoins = nextStreak === 3 ? 25 : nextStreak === 5 ? 50 : 100;
+    }
 
     await auth.supabase
       .from("player_positions")
@@ -183,13 +205,50 @@ export async function POST(request: NextRequest) {
         answering_question: false,
         current_question: null,
         question_deadline_at: null,
+        narrator_state: ns,
       })
       .eq("hunt_id", huntId)
-      .eq("player_id", auth.user.id);
+      .eq("player_id", userId);
+
+    let newCredits: number | undefined;
+    if (streakBonusCoins > 0) {
+      const { data: prof, error: profErr } = await auth.supabase
+        .from("player_profiles")
+        .select("credits")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!profErr && prof != null) {
+        const cur = Number(prof.credits) || 0;
+        newCredits = Math.round((cur + streakBonusCoins) * 100) / 100;
+        const { error: upErr } = await auth.supabase
+          .from("player_profiles")
+          .update({ credits: newCredits })
+          .eq("user_id", userId);
+        if (!upErr) {
+          await auth.supabase.from("transactions").insert({
+            player_id: userId,
+            hunt_id: huntId,
+            transaction_type: "question_reward",
+            amount: streakBonusCoins,
+            description: `Quiz streak bonus (${nextStreak} correct in a row)`,
+            item_id: `quiz_streak_${nextStreak}`,
+          });
+          responseStreakBonusCoins = streakBonusCoins;
+          responseStreakMilestone = streakMilestone ?? undefined;
+          responseNewCredits = newCredits;
+        }
+      }
+    }
+
+    responseQuizStreak = nextStreak;
   }
 
   return NextResponse.json({
     correct,
     reason: correct ? "match" : "no_match",
+    ...(responseQuizStreak !== undefined ? { quizStreak: responseQuizStreak } : {}),
+    ...(responseStreakBonusCoins !== undefined ? { streakBonusCoins: responseStreakBonusCoins } : {}),
+    ...(responseStreakMilestone !== undefined ? { streakMilestone: responseStreakMilestone } : {}),
+    ...(responseNewCredits !== undefined ? { newCredits: responseNewCredits } : {}),
   });
 }

@@ -13,6 +13,7 @@ import {
   regionMapViewIsWholeNigeria,
   type RegionMapView,
 } from "@/lib/region-map-view";
+import { addMapboxTrafficLayer } from "@/lib/mapbox-traffic-layer";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 type LngLat = { lng: number; lat: number };
@@ -2651,6 +2652,11 @@ export default function BroadcastPage() {
             });
           } catch {
             /* ignore */
+          }
+          try {
+            addMapboxTrafficLayer(map);
+          } catch {
+            /* optional tileset */
           }
           setMapReady(true);
         });

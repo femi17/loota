@@ -205,7 +205,13 @@ type Props = {
     params:
       | { question: string; correctAnswer: string; playerAnswer: string; options?: string[] }
       | { huntId: string; stepIndex: number; playerAnswer: string }
-  ) => Promise<{ correct: boolean }>;
+  ) => Promise<{
+    correct: boolean;
+    quizStreak?: number;
+    streakBonusCoins?: number;
+    streakMilestone?: number;
+    newCredits?: number;
+  }>;
   /** When set (AI quiz brain), fetch question from API when player clicks Start. */
   activeHuntId?: string | null;
   getQuestionForStep?: (stepIndex: number) => Promise<{ prompt: string; options?: string[] } | null>;

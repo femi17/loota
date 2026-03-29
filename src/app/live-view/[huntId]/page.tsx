@@ -15,6 +15,7 @@ import { positionAlongRoute, parseWaypointCoords } from "@/app/hunts/utils";
 import type { LngLat } from "@/app/hunts/types";
 import { makeAvatarEl } from "@/app/hunts/mapMarkerFactories";
 import { TRAVEL_MODES } from "@/app/hunts/constants";
+import { addMapboxTrafficLayer } from "@/lib/mapbox-traffic-layer";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const DEFAULT_CENTER: LngLat = { lng: 8.5, lat: 9.5 };
@@ -404,6 +405,11 @@ export function LiveViewContent({ huntId, backHref = "/", backLabel = "← Back"
       mapRef.current = map;
       map.on("load", () => {
         if (!cancelled) map.resize();
+        try {
+          addMapboxTrafficLayer(map);
+        } catch {
+          /* optional */
+        }
         setMapReady(true);
       });
     })();

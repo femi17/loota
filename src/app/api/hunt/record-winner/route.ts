@@ -38,11 +38,17 @@ export async function POST(request: NextRequest) {
 
   const admin = createServiceRoleClient();
 
-  const [{ data: hunt }, { data: reg }] = await Promise.all([
+  const [{ data: hunt }, { data: reg }, { data: pos }] = await Promise.all([
     admin.from("hunts").select("id, keys_to_win").eq("id", huntId).maybeSingle(),
     admin
       .from("hunt_registrations")
       .select("keys_earned")
+      .eq("hunt_id", huntId)
+      .eq("player_id", user.id)
+      .maybeSingle(),
+    admin
+      .from("player_positions")
+      .select("keys")
       .eq("hunt_id", huntId)
       .eq("player_id", user.id)
       .maybeSingle(),
@@ -58,12 +64,18 @@ export async function POST(request: NextRequest) {
       ? Number((hunt as { keys_to_win?: number }).keys_to_win)
       : 5
   );
-  const currentKeys = Math.max(
+  // Gameplay stores key count on player_positions (see validate-answer — hunt_registrations.keys_earned is not updated on quiz).
+  const regKeys = Math.max(
     0,
     Number.isFinite((reg as { keys_earned?: number } | null)?.keys_earned)
       ? Number((reg as { keys_earned?: number }).keys_earned)
       : 0
   );
+  const posKeys = Math.max(
+    0,
+    Number.isFinite((pos as { keys?: number } | null)?.keys) ? Number((pos as { keys?: number }).keys) : 0
+  );
+  const currentKeys = Math.max(regKeys, posKeys);
 
   if (currentKeys < requiredKeys) {
     return NextResponse.json(
@@ -129,8 +141,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    await admin
+      .from("hunt_registrations")
+      .update({ keys_earned: currentKeys })
+      .eq("hunt_id", huntId)
+      .eq("player_id", user.id);
+
     return NextResponse.json({ ok: true, fallback: true });
   }
+
+  // Keep hunt_registrations aligned with gameplay (player_positions) for reporting.
+  await admin
+    .from("hunt_registrations")
+    .update({ keys_earned: currentKeys })
+    .eq("hunt_id", huntId)
+    .eq("player_id", user.id);
 
   // Optional feed action for broadcast/admin timeline.
   await admin.from("hunt_player_actions").insert({

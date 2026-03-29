@@ -15,11 +15,34 @@ type MinimalMap = {
   addLayer: (layer: object, beforeId?: string) => void;
 };
 
-function findFirstSymbolLayerId(map: MinimalMap): string | undefined {
+/**
+ * Streets v12 lists many symbol layers before road paint finishes (oneway arrows, etc.).
+ * Inserting traffic before the *first* symbol buried it under all roads — invisible.
+ * Place traffic immediately before road text labels so it sits on painted roads but under labels.
+ */
+function findTrafficInsertBeforeLayerId(map: MinimalMap): string | undefined {
   const layers = map.getStyle()?.layers;
-  if (!layers) return undefined;
-  for (const layer of layers) {
-    if (layer.type === "symbol") return layer.id;
+  if (!layers?.length) return undefined;
+  const prefer = [
+    "road-label",
+    "road-intersection",
+    "road-number-shield",
+    "path-pedestrian-label",
+    "waterway-label",
+  ];
+  for (const id of prefer) {
+    if (layers.some((l) => l.id === id)) return id;
+  }
+  const roadSymbol = layers.find(
+    (l) =>
+      l.type === "symbol" &&
+      /road|street|path|bridge|tunnel/i.test(l.id) &&
+      !/oneway|arrow|shield-exit/i.test(l.id),
+  );
+  if (roadSymbol) return roadSymbol.id;
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const l = layers[i];
+    if (l.type === "symbol") return l.id;
   }
   return undefined;
 }
@@ -34,11 +57,12 @@ export function addMapboxTrafficLayer(map: MinimalMap): void {
         url: "mapbox://mapbox.mapbox-traffic-v1",
       });
     }
-  } catch {
+  } catch (e) {
+    console.warn("[mapbox-traffic] addSource failed (token/plan or network)", e);
     return;
   }
 
-  const beforeId = findFirstSymbolLayerId(map);
+  const beforeId = findTrafficInsertBeforeLayerId(map);
 
   const layer = {
     id: TRAFFIC_LAYER_ID,
@@ -94,7 +118,7 @@ export function addMapboxTrafficLayer(map: MinimalMap): void {
     } else {
       map.addLayer(layer);
     }
-  } catch {
-    /* style race or duplicate */
+  } catch (e) {
+    console.warn("[mapbox-traffic] addLayer failed", e);
   }
 }

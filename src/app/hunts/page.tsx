@@ -138,6 +138,7 @@ import {
 } from "./mapMarkerFactories";
 import { useHuntData } from "./useHuntData";
 import { useHuntsCore } from "./hooks/useHuntsCore";
+import { chapterBeatMessage } from "@/lib/hunt-chapter-beats";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const PAYSTACK_PUBLIC_KEY_FREE = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY ?? "";
@@ -203,6 +204,10 @@ export default function HuntsPage() {
   const huntsTravelCameraLastMoveAtRef = useRef(0);
   /** While a route is shown or during travel, user may pan/zoom; pause auto-follow so the camera does not fight them. */
   const huntsRouteExplorePauseAtRef = useRef(0);
+  /** Green pin for next checkpoint while a constraint stop route is shown (stop pin uses primary destination marker). */
+  const constraintGoalMarkerRef = useRef<{ remove?: () => void; setLngLat: (ll: [number, number]) => void } | null>(null);
+  /** Avoid chapter-beat spam on bulk key restore; only toast on +1 key in-session. */
+  const lastChapterKeysRef = useRef(0);
 
   // Persist hospital/faint enforcement so reload/navigation cannot bypass required action/payment.
   useEffect(() => {
@@ -402,18 +407,30 @@ export default function HuntsPage() {
     const winnerKey = `${activeHuntId}:${user.id}`;
     if (winnerRecordedRef.current === winnerKey) return;
     winnerRecordedRef.current = winnerKey;
-    fetch("/api/hunt/record-winner", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        hunt_id: activeHuntId,
-        keys,
-        keys_to_win: keysToWin,
-      }),
-    }).catch(() => {
-      // Allow retry on next render if request fails.
-      winnerRecordedRef.current = null;
-    });
+    void (async () => {
+      const delay = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+      try {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (attempt > 0) await delay(700);
+          const res = await fetch("/api/hunt/record-winner", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hunt_id: activeHuntId }),
+          });
+          const data = (await res.json().catch(() => null)) as { error?: string } | null;
+          if (res.ok) return;
+          // 403 often means player_positions.keys not flushed yet; retry a few times.
+          const retry = res.status === 403 || res.status === 409;
+          if (!retry) {
+            console.warn("[Hunts] record-winner failed", res.status, data?.error);
+            break;
+          }
+        }
+        winnerRecordedRef.current = null;
+      } catch {
+        winnerRecordedRef.current = null;
+      }
+    })();
   }, [activeHuntId, user?.id, keys, keysToWin]);
 
   const isUserCompletedHunt = keysToWin > 0 && keys >= keysToWin;
@@ -1083,6 +1100,41 @@ export default function HuntsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rps, keysToWin]);
 
+  const prevHuntIdForChapterRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = activeHuntId ?? null;
+    if (prevHuntIdForChapterRef.current !== id) {
+      prevHuntIdForChapterRef.current = id;
+      lastChapterKeysRef.current = keys;
+    }
+  }, [activeHuntId, keys]);
+
+  useEffect(() => {
+    if (!huntHasStarted || !activeHuntId || !activeHunt) return;
+    const prev = lastChapterKeysRef.current;
+    if (keys <= prev) {
+      lastChapterKeysRef.current = keys;
+      return;
+    }
+    if (keys > prev + 1) {
+      lastChapterKeysRef.current = keys;
+      return;
+    }
+    lastChapterKeysRef.current = keys;
+    const idx = keys - 1;
+    const wp = Array.isArray(activeHunt.waypoints) ? activeHunt.waypoints[idx] : undefined;
+    const label = wp?.label?.trim() ? wp.label : null;
+    const message = chapterBeatMessage({
+      keyCount: keys,
+      waypointLabel: label,
+      huntTitle: activeHunt.region_name?.trim() || "the hunt",
+    });
+    const t = window.setTimeout(() => {
+      setToast({ title: "Story beat", message });
+    }, 550);
+    return () => window.clearTimeout(t);
+  }, [keys, huntHasStarted, activeHuntId, activeHunt, setToast]);
+
   function openDrawer(next: DrawerId) {
     // If the player is in the middle of choosing a trip, keep a way back after shopping.
     if (next === "inventory" || next === "coins") {
@@ -1300,7 +1352,13 @@ export default function HuntsPage() {
       params:
         | { question: string; correctAnswer: string; playerAnswer: string; options?: string[] }
         | { huntId: string; stepIndex: number; playerAnswer: string }
-    ): Promise<{ correct: boolean }> => {
+    ): Promise<{
+      correct: boolean;
+      quizStreak?: number;
+      streakBonusCoins?: number;
+      streakMilestone?: number;
+      newCredits?: number;
+    }> => {
       try {
         const body =
           "huntId" in params
@@ -1316,14 +1374,44 @@ export default function HuntsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = (await res.json()) as { correct?: boolean; error?: string };
+        const data = (await res.json()) as {
+          correct?: boolean;
+          error?: string;
+          quizStreak?: number;
+          streakBonusCoins?: number;
+          streakMilestone?: number;
+          newCredits?: number;
+        };
         if (!res.ok) return { correct: false };
-        return { correct: Boolean(data.correct) };
+        const ok = Boolean(data.correct);
+        if (
+          ok &&
+          typeof data.streakBonusCoins === "number" &&
+          data.streakBonusCoins > 0 &&
+          typeof data.streakMilestone === "number"
+        ) {
+          setToast({
+            title: `${data.streakMilestone} correct in a row!`,
+            message: `Streak bonus: +${data.streakBonusCoins} coins.`,
+          });
+          if (typeof data.newCredits === "number") {
+            setCredits(data.newCredits);
+            updateCredits?.(data.newCredits);
+          }
+          void refreshProfile?.();
+        }
+        return {
+          correct: ok,
+          quizStreak: data.quizStreak,
+          streakBonusCoins: data.streakBonusCoins,
+          streakMilestone: data.streakMilestone,
+          newCredits: data.newCredits,
+        };
       } catch {
         return { correct: false };
       }
     },
-    []
+    [setToast, setCredits, updateCredits, refreshProfile]
   );
 
   const getQuestionForStep = useCallback(
@@ -2019,6 +2107,56 @@ export default function HuntsPage() {
               },
             });
           }
+          // After constraint stop: path from stop area → next checkpoint (under detour; green dashed).
+          if (!map.getSource("checkpoint-resume-route")) {
+            map.addSource("checkpoint-resume-route", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates: [] },
+              },
+            });
+          }
+          if (!map.getLayer("checkpoint-resume-route-line")) {
+            map.addLayer({
+              id: "checkpoint-resume-route-line",
+              type: "line",
+              source: "checkpoint-resume-route",
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: {
+                "line-color": "#15803d",
+                "line-width": 3,
+                "line-opacity": 0.72,
+                "line-dasharray": [1.2, 1.2],
+              },
+            });
+          }
+          if (!map.getLayer("checkpoint-resume-route-direction")) {
+            map.addLayer({
+              id: "checkpoint-resume-route-direction",
+              type: "symbol",
+              source: "checkpoint-resume-route",
+              layout: {
+                "symbol-placement": "line",
+                "symbol-spacing": 64,
+                "text-field": "▶",
+                "text-size": 12,
+                "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
+                "text-keep-upright": false,
+                "text-rotation-alignment": "map",
+                "text-pitch-alignment": "viewport",
+                visibility: "none",
+              },
+              paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#166534",
+                "text-halo-width": 2,
+              },
+            });
+          }
           // Planned route (Travel drawer / pending destination) before tapping Go — same green styling as active leg.
           if (!map.getSource("preview-travel-route")) {
             map.addSource("preview-travel-route", {
@@ -2069,7 +2207,7 @@ export default function HuntsPage() {
               },
             });
           }
-          // Detour to stop (relax) or hospital — line + chevrons on top
+          // Detour to stop (constraint) or hospital — drawn above preview/checkpoint so the immediate leg reads clearly.
           if (!map.getSource("detour-route")) {
             map.addSource("detour-route", {
               type: "geojson",
@@ -2088,7 +2226,7 @@ export default function HuntsPage() {
               layout: { "line-join": "round", "line-cap": "round" },
               paint: {
                 "line-color": "#16A34A",
-                "line-width": 4,
+                "line-width": 5,
               },
             });
           }
@@ -2283,8 +2421,8 @@ export default function HuntsPage() {
       properties: {},
       geometry: { type: "LineString", coordinates },
     });
-    const lineColor = isTravellingToHospital ? "#DC2626" : "#16A34A";
-    const haloColor = isTravellingToHospital ? "#DC2626" : "#15803d";
+    const lineColor = isTravellingToHospital ? "#DC2626" : "#EA580C";
+    const haloColor = isTravellingToHospital ? "#DC2626" : "#C2410C";
     try {
       map.setPaintProperty("detour-route-line", "line-color", lineColor);
     } catch {
@@ -2301,6 +2439,39 @@ export default function HuntsPage() {
       /* layer may not exist yet */
     }
   }, [mapReady, stopFlow?.status, stopFlow?.kind, routeCoords, isTravellingToHospital]);
+
+  // Path from constraint stop → next checkpoint (resume leg). Shown together with orange detour to the stop.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource("checkpoint-resume-route") as
+      | { setData: (data: GeoJSON.Feature<GeoJSON.LineString>) => void }
+      | undefined;
+    if (!source?.setData) return;
+
+    const showDetourStop =
+      stopFlow?.status === "to_stop" &&
+      !stopFlow?.restInPlace &&
+      (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest");
+    const coords =
+      showDetourStop && stopFlow.resumeCoords && stopFlow.resumeCoords.length >= 2
+        ? stopFlow.resumeCoords
+        : [];
+    source.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: coords },
+    });
+    try {
+      map.setLayoutProperty(
+        "checkpoint-resume-route-direction",
+        "visibility",
+        coords.length >= 2 ? "visible" : "none",
+      );
+    } catch {
+      /* layer may not exist yet */
+    }
+  }, [mapReady, stopFlow?.status, stopFlow?.kind, stopFlow?.restInPlace, stopFlow?.resumeCoords]);
 
   // Update markers & route when state changes
   useEffect(() => {
@@ -2703,6 +2874,12 @@ export default function HuntsPage() {
         } catch {}
         destinationMarkerRef.current = null;
       }
+      if (constraintGoalMarkerRef.current) {
+        try {
+          constraintGoalMarkerRef.current.remove?.();
+        } catch {}
+        constraintGoalMarkerRef.current = null;
+      }
       destinationPinColorRef.current = "yellow";
       destinationMarkerLastPosRef.current = null;
       return;
@@ -2715,11 +2892,17 @@ export default function HuntsPage() {
     const quizPinPos = nextLocation?.to ?? (Array.isArray(wp) && wp.length > 0 ? parseWaypointCoords(wp[waypointIndex] ?? wp[0]) : null);
     const quizPosValid = quizPinPos && isLngLatInNigeria(quizPinPos);
 
-    // [3] Stop types (relaxation, bus) — for blue/yellow pin
+    // [3] Stop types (relaxation, refuel, bus) — for blue/yellow pin
     const isRelaxationStop =
       stopFlow &&
-      (stopFlow.kind === "rejuvenate" || stopFlow.kind === "rest") &&
+      (stopFlow.kind === "rejuvenate" || stopFlow.kind === "rest" || stopFlow.kind === "refuel") &&
       stopFlow.stop;
+    const constraintToStopOnMap =
+      stopFlow?.status === "to_stop" &&
+      !stopFlow.restInPlace &&
+      isRelaxationStop &&
+      stopFlow.stop?.center &&
+      stopFlow.stop.center.length >= 2;
     const isBusStopDestination =
       (isTraveling && yourCurrentModeId === "bus") ||
       travelPause?.kind === "bus_stop" ||
@@ -2744,6 +2927,10 @@ export default function HuntsPage() {
       }
     }
     const stopCenter = stopFlow?.stop?.center;
+    if (!posToShow && constraintToStopOnMap && stopCenter && stopCenter.length >= 2) {
+      posToShow = { lng: stopCenter[0], lat: stopCenter[1] };
+      pinColor = "blue";
+    }
     if (!posToShow && isRelaxationStop && stopCenter && stopCenter.length >= 2) {
       posToShow = { lng: stopCenter[0], lat: stopCenter[1] };
       pinColor = "blue";
@@ -2780,6 +2967,12 @@ export default function HuntsPage() {
           destinationMarkerRef.current.remove?.();
         } catch {}
         destinationMarkerRef.current = null;
+      }
+      if (constraintGoalMarkerRef.current) {
+        try {
+          constraintGoalMarkerRef.current.remove?.();
+        } catch {}
+        constraintGoalMarkerRef.current = null;
       }
       destinationPinColorRef.current = "yellow";
       destinationMarkerLastPosRef.current = null;
@@ -2837,6 +3030,33 @@ export default function HuntsPage() {
         }
       }
     }
+
+    // Second pin: next checkpoint while navigating to a constraint stop (primary pin is the stop).
+    const checkpointAfterStopPos: { lng: number; lat: number } | null =
+      quizPosValid && quizPinPos
+        ? quizPinPos
+        : stopFlow?.finalTo && isLngLatInNigeria(stopFlow.finalTo)
+          ? stopFlow.finalTo
+          : null;
+    if (constraintToStopOnMap && checkpointAfterStopPos) {
+      const gl: [number, number] = [checkpointAfterStopPos.lng, checkpointAfterStopPos.lat];
+      if (!constraintGoalMarkerRef.current) {
+        const el = makeDestinationPinEl("green");
+        el.setAttribute("data-marker-role", "checkpoint-after-stop");
+        constraintGoalMarkerRef.current = new Marker({ element: el, anchor: "bottom" })
+          .setLngLat(gl)
+          .addTo(map);
+      } else {
+        constraintGoalMarkerRef.current.setLngLat(gl);
+      }
+    } else {
+      if (constraintGoalMarkerRef.current) {
+        try {
+          constraintGoalMarkerRef.current.remove?.();
+        } catch {}
+        constraintGoalMarkerRef.current = null;
+      }
+    }
   }, [
     huntHasStarted,
     mapReady,
@@ -2855,6 +3075,9 @@ export default function HuntsPage() {
     prep?.modeId,
     stopFlow?.kind,
     stopFlow?.stop,
+    stopFlow?.status,
+    stopFlow?.restInPlace,
+    stopFlow?.finalTo,
   ]);
 
   // Camera: keep the moving avatar(s) in view. (Map boots at Nigeria zoom ~5; first real position triggers a jump — see initialHuntsCameraSnapRef.)
@@ -5219,6 +5442,26 @@ export default function HuntsPage() {
       return;
     }
 
+    // Constraint "go to stop": preview would duplicate the green player→checkpoint line on top of the orange detour.
+    // Checkpoint leg uses checkpoint-resume-route + detour-route instead.
+    const constraintToStopPlanning =
+      stopFlow?.status === "to_stop" &&
+      !stopFlow.restInPlace &&
+      (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest");
+    if (constraintToStopPlanning) {
+      source.setData({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: [] },
+      });
+      try {
+        map.setLayoutProperty("preview-travel-route-direction", "visibility", "none");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
     let coords: Array<[number, number]> = [];
     const planningTrip =
       Boolean(pendingDestination || drawer === "travel" || destForDirs) &&
@@ -5260,6 +5503,9 @@ export default function HuntsPage() {
     baseDirs.walking,
     baseDirs.cycling,
     baseDirs.driving,
+    stopFlow?.status,
+    stopFlow?.restInPlace,
+    stopFlow?.kind,
   ]);
 
   /** Find nearest bus stop to the given coordinates. */
