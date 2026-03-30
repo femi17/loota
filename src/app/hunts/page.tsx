@@ -119,6 +119,7 @@ import { HuntsDrawerShell } from "@/components/hunts/HuntsDrawerShell";
 import { HuntsLeaderboardDrawerContent } from "@/components/hunts/HuntsLeaderboardDrawerContent";
 import { HuntsDestinationDrawerContent } from "@/components/hunts/HuntsDestinationDrawerContent";
 import { HuntsConstraintDrawerContent } from "@/components/hunts/HuntsConstraintDrawerContent";
+import { HuntsConsequenceDrawerContent } from "@/components/hunts/HuntsConsequenceDrawerContent";
 import { HuntsHospitalDrawerContent } from "@/components/hunts/HuntsHospitalDrawerContent";
 import { HuntsBreakdownDrawerContent } from "@/components/hunts/HuntsBreakdownDrawerContent";
 import { HuntsStatusDrawerContent } from "@/components/hunts/HuntsStatusDrawerContent";
@@ -190,6 +191,13 @@ export default function HuntsPage() {
     travellingHasStartedThisHuntRef, travelSyncPosRef, wasTravelingForBroadcastRef, travelBroadcastPayloadRef, narratorStateRef, lastArrivalAtRef,
     ARRIVAL_REALTIME_IGNORE_MS, travelStartedAtRef, TRAVEL_START_REALTIME_IGNORE_MS,
   } = core;
+
+  // Out-of-fuel UX: show the stranded vehicle on the map until recovered.
+  const strandedVehicleRef = useRef<null | { at: LngLat; modeId: "car" | "motorbike" }>(null);
+  const strandedVehicleMarkerRef = useRef<any>(null);
+  const trafficSuggestKeyRef = useRef<string>("");
+  const [trafficSuggestOpen, setTrafficSuggestOpen] = useState(false);
+  const [strandedVehicleTick, setStrandedVehicleTick] = useState(0);
 
   const [gatewayActionLoading, setGatewayActionLoading] = useState(false);
   const winnerRecordedRef = useRef<string | null>(null);
@@ -3081,6 +3089,37 @@ export default function HuntsPage() {
     stopFlow?.finalTo,
   ]);
 
+  // Marker for a stranded vehicle (out of fuel): show where the car/motorbike was left.
+  useEffect(() => {
+    const map = mapRef.current;
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapReady || !mapboxgl?.Marker) return;
+    const Marker = mapboxgl.Marker;
+
+    const stranded = strandedVehicleRef.current;
+    if (!stranded) {
+      if (strandedVehicleMarkerRef.current) {
+        try {
+          strandedVehicleMarkerRef.current.remove?.();
+        } catch {}
+        strandedVehicleMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const symbol = stranded.modeId === "car" ? "directions_car" : "two_wheeler";
+    const el = makePickupVehicleEl(symbol, "#DC2626");
+    el.setAttribute("data-marker-role", "stranded-vehicle");
+
+    if (!strandedVehicleMarkerRef.current) {
+      strandedVehicleMarkerRef.current = new Marker({ element: el, anchor: "bottom" })
+        .setLngLat([stranded.at.lng, stranded.at.lat])
+        .addTo(map);
+    } else {
+      strandedVehicleMarkerRef.current.setLngLat([stranded.at.lng, stranded.at.lat]);
+    }
+  }, [mapReady, strandedVehicleTick]);
+
   // Camera: keep the moving avatar(s) in view. (Map boots at Nigeria zoom ~5; first real position triggers a jump — see initialHuntsCameraSnapRef.)
   useEffect(() => {
     const map = mapRef.current;
@@ -3806,6 +3845,30 @@ export default function HuntsPage() {
   useEffect(() => {
     setDrivingRouteChoice("primary");
   }, [baseDirsStableKey]);
+
+  // If live traffic suggests a faster alternate route, offer it (do not force).
+  useEffect(() => {
+    if (drawer !== "travel" || isTraveling) {
+      setTrafficSuggestOpen(false);
+      return;
+    }
+    const d = baseDirs.driving;
+    if (!d?.alternate || !d.alternate.coords?.length) return;
+    const primary = Number(d.durationSeconds) || 0;
+    const alt = Number(d.alternate.durationSeconds) || 0;
+    const delay = d.trafficDelaySeconds != null ? Number(d.trafficDelaySeconds) : null;
+    const altUseful =
+      primary > 0 && alt > 0 && (alt <= primary - 45 || alt <= primary * 0.92);
+    const bigDelay = delay != null && Number.isFinite(delay) && delay >= 90;
+    if (!altUseful || !bigDelay) return;
+    if (drivingRouteChoice !== "primary") return;
+
+    const key = baseDirsStableKey ? `alt:${baseDirsStableKey}` : "";
+    if (!key) return;
+    if (trafficSuggestKeyRef.current === key) return;
+    trafficSuggestKeyRef.current = key;
+    setTrafficSuggestOpen(true);
+  }, [drawer, isTraveling, baseDirsStableKey, baseDirs.driving, drivingRouteChoice]);
 
   // Build base durations/coords to show per-mode ETA choices (3 requests total).
   // Only when travel drawer is open; skip when traveling; throttle by position/dest so we don't burn Mapbox on every GPS tick.
@@ -4610,26 +4673,21 @@ export default function HuntsPage() {
             setProgress(0);
             setRouteCoords([]);
             setDestination(null);
-            setDrawer(null);
+            setDrawer("consequence");
             void (async () => {
               try {
                 if (kind === "out_of_fuel") {
-                  const gas = await findNearbyStop("refuel", pos);
-                  const to = { lng: gas.center[0], lat: gas.center[1] };
-                  const dirs = await getDirections(pos, to, "walking");
-                  if (dirs?.coords?.length >= 2) {
-                    consequenceReturnToRef.current = pos;
-                    startTravelWithRoute(pos, to, dirs.coords, "walk", dirs.durationSeconds);
-                    setToast({ title: "Out of fuel", message: "Walking to gas station, then back to your vehicle." });
-                  }
+                  // Show a consequence modal first; user pays then chooses to walk to gas station.
+                  setConsequenceFlow({ kind: "out_of_fuel", at: pos, modeId: tr.modeId });
+                  strandedVehicleRef.current =
+                    tr.modeId === "car" || tr.modeId === "motorbike"
+                      ? { at: pos, modeId: tr.modeId }
+                      : null;
+                  setStrandedVehicleTick((n) => n + 1);
+                  // Avoid "arrived at waypoint" quiz drawer when returning to the vehicle.
+                  skipNextAtWaypointEffectRef.current = true;
                 } else if (kind === "bike_repair") {
-                  const shop = await findNearbyStop("rejuvenate", pos);
-                  const to = { lng: shop.center[0], lat: shop.center[1] };
-                  const dirs = await getDirections(pos, to, "walking");
-                  if (dirs?.coords?.length >= 2) {
-                    startTravelWithRoute(pos, to, dirs.coords, "walk", dirs.durationSeconds);
-                    setToast({ title: "Bike repair", message: "Walking to the nearest bike shop." });
-                  }
+                  setConsequenceFlow({ kind: "bike_repair", at: pos, modeId: tr.modeId });
                 }
               } catch (_) {
                 setToast({ title: "Error", message: "Could not find a place nearby. Try again." });
@@ -4822,6 +4880,8 @@ export default function HuntsPage() {
               getDirections(tr.to, returnTo, "walking")
                 .then((walkRoute) => {
                   if (walkRoute?.coords?.length >= 2) {
+                    // Returning to a stranded vehicle might coincide with a waypoint; do not pop the quiz drawer mid-recovery.
+                    skipNextAtWaypointEffectRef.current = true;
                     startTravelWithRoute(tr.to, returnTo, walkRoute.coords, "walk", walkRoute.durationSeconds);
                     setToast({ title: "Got fuel", message: "Walking back to your vehicle." });
                   }
@@ -4834,6 +4894,15 @@ export default function HuntsPage() {
                 });
               suppressKeyRef.current = false;
               return;
+            }
+
+            // If we just arrived back at a stranded vehicle location, clear the marker and avoid forcing the quiz drawer.
+            const stranded = strandedVehicleRef.current;
+            if (stranded && haversineKm(arrivalPos, stranded.at) <= 0.06) {
+              strandedVehicleRef.current = null;
+              setStrandedVehicleTick((n) => n + 1);
+              setToast({ title: "Back at your vehicle", message: "You can continue your trip from Travel." });
+              skipNextAtWaypointEffectRef.current = true;
             }
 
             // Faint consequence: arrived at hospital → remove red marker/route, then 30 min stay then pay bill
@@ -6318,7 +6387,7 @@ export default function HuntsPage() {
               secondsUntilStart={secondsUntilStart ?? 0}
             />
             {canPlayHunt && secondsUntilEnd != null ? (
-              <div className="pointer-events-none absolute left-1/2 top-3 z-30 w-[min(100%,280px)] -translate-x-1/2 px-2 sm:top-4 sm:w-auto">
+              <div className="pointer-events-none absolute left-1/2 top-16 z-30 w-[min(100%,280px)] -translate-x-1/2 px-2 sm:top-4 sm:w-auto">
                 <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-2.5 text-center shadow-lg ring-1 ring-amber-500/20">
                   <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
                     Hunt ends in
@@ -6445,6 +6514,40 @@ export default function HuntsPage() {
           status: navNotifications.status,
         }}
       />
+
+      {trafficSuggestOpen ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl border border-slate-200">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Traffic alert</p>
+            <p className="mt-2 text-base font-extrabold text-[#0F172A]">Heavy traffic ahead</p>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+              We found a faster alternate route. Do you want to switch, or stay on your current route?
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDrivingRouteChoice("primary");
+                  setTrafficSuggestOpen(false);
+                }}
+                className="flex-1 min-h-[44px] rounded-2xl border border-slate-200 bg-white text-slate-700 font-extrabold text-xs uppercase tracking-widest hover:bg-slate-50 transition-colors"
+              >
+                Stay
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrivingRouteChoice("alternate");
+                  setTrafficSuggestOpen(false);
+                }}
+                className="flex-1 min-h-[44px] rounded-2xl bg-[#0F172A] text-white font-extrabold text-xs uppercase tracking-widest hover:bg-[#2563EB] transition-colors"
+              >
+                Take alternate
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <HuntsToast toast={toast} />
 
@@ -6964,6 +7067,75 @@ export default function HuntsPage() {
                     setStopFlow(null);
                     setDrawer(null);
                   }
+                }}
+              />
+            ) : null}
+
+            {drawer === "consequence" ? (
+              <HuntsConsequenceDrawerContent
+                consequenceFlow={consequenceFlow}
+                credits={credits}
+                outOfFuelCostCoins={
+                  consequenceFlow?.kind === "out_of_fuel"
+                    ? consequenceFlow.modeId === "car"
+                      ? COST_REFUEL_CAR
+                      : COST_REFUEL_MOTO
+                    : COST_REFUEL_MOTO
+                }
+                deductCredits={deductCredits}
+                openDrawer={openDrawer}
+                setPayError={setPayError}
+                onGoToHospital={() => {
+                  // Faint consequence is handled by the hospital flow; keep this as a safe fallback.
+                  setDrawer("hospital");
+                }}
+                onWalkToGasStation={() => {
+                  const flow = consequenceFlow;
+                  if (!flow || flow.kind !== "out_of_fuel") return;
+                  const pos = flow.at;
+                  setDrawer(null);
+                  setConsequenceFlow(null);
+                  void (async () => {
+                    try {
+                      const gas = await findNearbyStop("refuel", pos);
+                      const to = { lng: gas.center[0], lat: gas.center[1] };
+                      const dirs = await getDirections(pos, to, "walking");
+                      if (dirs?.coords?.length >= 2) {
+                        consequenceReturnToRef.current = pos;
+                        startTravelWithRoute(pos, to, dirs.coords, "walk", dirs.durationSeconds);
+                        setToast({
+                          title: "Refueling",
+                          message: "Walking to gas station, then back to your vehicle.",
+                        });
+                      } else {
+                        setToast({ title: "Route unavailable", message: "Couldn't find a walking route to a gas station." });
+                      }
+                    } catch {
+                      setToast({ title: "Error", message: "Could not find a gas station nearby. Try again." });
+                    }
+                  })();
+                }}
+                onWalkToBikeShop={() => {
+                  const flow = consequenceFlow;
+                  if (!flow || flow.kind !== "bike_repair") return;
+                  const pos = flow.at;
+                  setDrawer(null);
+                  setConsequenceFlow(null);
+                  void (async () => {
+                    try {
+                      const shop = await findNearbyStop("rejuvenate", pos);
+                      const to = { lng: shop.center[0], lat: shop.center[1] };
+                      const dirs = await getDirections(pos, to, "walking");
+                      if (dirs?.coords?.length >= 2) {
+                        startTravelWithRoute(pos, to, dirs.coords, "walk", dirs.durationSeconds);
+                        setToast({ title: "Bike repair", message: "Walking to the nearest bike shop." });
+                      } else {
+                        setToast({ title: "Route unavailable", message: "Couldn't find a walking route to a repair spot." });
+                      }
+                    } catch {
+                      setToast({ title: "Error", message: "Could not find a place nearby. Try again." });
+                    }
+                  })();
                 }}
               />
             ) : null}
