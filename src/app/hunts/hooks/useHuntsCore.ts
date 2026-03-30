@@ -304,16 +304,20 @@ export function useHuntsCore() {
     setActiveHuntId,
     isRegisteredForHunt,
     secondsUntilStart,
+    secondsUntilEnd,
     huntFetchDone,
     huntHasStarted,
+    huntHasEnded,
   } = useHuntData(user?.id);
+
+  const canPlayHunt = huntHasStarted && !huntHasEnded;
 
   activeHuntIdRef.current = activeHuntId;
   huntHasStartedRef.current = huntHasStarted;
 
   // Warn when closing/refreshing during an active hunt (cannot block; progress is saved)
   useEffect(() => {
-    if (!huntHasStarted) return;
+    if (!canPlayHunt) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "Leave hunt? Your progress is saved.";
@@ -321,7 +325,7 @@ export function useHuntsCore() {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [huntHasStarted]);
+  }, [canPlayHunt]);
 
   const deductCredits = useCallback(
     async (amount: number, huntId?: string | null): Promise<number | null> => {
@@ -1214,7 +1218,7 @@ export function useHuntsCore() {
 
   // When user is at the current waypoint (waypoint vs current location match), sync state and show status/quiz.
   useEffect(() => {
-    if (!huntHasStarted || !activeHuntId) return;
+    if (!canPlayHunt || !activeHuntId) return;
     if (faintPhase != null || hospitalStay != null || isTravellingToHospital) return;
     if (activeHuntId && readPendingHospitalHuntId() === activeHuntId) return;
 
@@ -1253,7 +1257,7 @@ export function useHuntsCore() {
       setDrawer("status");
     }
   }, [
-    huntHasStarted,
+    canPlayHunt,
     activeHuntId,
     isAtCurrentWaypoint,
     huntPhase,
@@ -1272,7 +1276,7 @@ export function useHuntsCore() {
         (huntPhase === "public_trip" && Boolean(publicLocation));
       const hasTaskToDo = Boolean(publicTaskQuestion) || Boolean(unlockTaskQuestion);
       const travel =
-        huntHasStarted && !isTraveling && hasDestination && !hasTaskToDo;
+        canPlayHunt && !isTraveling && hasDestination && !hasTaskToDo;
 
       const garage = (VEHICLE_IDS as VehicleId[]).some((id) => {
         const v = vehicleState[id];
@@ -1280,15 +1284,16 @@ export function useHuntsCore() {
       });
 
       const status =
-        isAtCurrentWaypoint ||
-        arrivedForChallenge ||
-        Boolean(publicTaskQuestion) ||
-        Boolean(unlockTaskQuestion);
+        canPlayHunt &&
+        (isAtCurrentWaypoint ||
+          arrivedForChallenge ||
+          Boolean(publicTaskQuestion) ||
+          Boolean(unlockTaskQuestion));
 
       return { ...prev, travel, garage, status };
     });
   }, [
-    huntHasStarted,
+    canPlayHunt,
     isTraveling,
     pendingDestination,
     destination,
@@ -1503,7 +1508,7 @@ export function useHuntsCore() {
     drawer, setDrawer, resumeDrawerRef, navNotifications, setNavNotifications, shopError, setShopError, payError, setPayError,
     paystackLoading, setPaystackLoading, huntLeaderboard, setHuntLeaderboard, leaderboardLoading, setLeaderboardLoading,
     initialCreditsRef, activeHunt, setActiveHunt, activeHuntId, setActiveHuntId, isRegisteredForHunt, secondsUntilStart,
-    huntFetchDone, huntHasStarted, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
+    secondsUntilEnd, huntFetchDone, huntHasStarted, huntHasEnded, canPlayHunt, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
     playerPositionsHydrated,
     travelMode, travelPickModeId, setTravelPickModeId, startLocation, publicLocation, publicLocationLabel, currentWaypoint,
     playerPos, setPlayerPos, userCountry, setUserCountry, locationIsApproximate, setLocationIsApproximate, destination, setDestination,

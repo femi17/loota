@@ -16,6 +16,7 @@ import {
   normalizePlayerIdForDb,
   roundLngLatForPlayerPositionsDb,
 } from "@/lib/player-positions-db";
+import { isHuntPastEndDate } from "@/lib/hunt-schedule";
 
 function formatCountdown(totalSeconds: number) {
   const clamped = Math.max(0, Math.floor(totalSeconds));
@@ -420,7 +421,9 @@ function LobbyPageInner() {
     [secondsRemaining],
   );
 
-  const huntIsLive = secondsRemaining <= 0;
+  const huntEndedBySchedule =
+    Boolean(activeHunt?.end_date) && isHuntPastEndDate(activeHunt!.end_date);
+  const huntIsLive = secondsRemaining <= 0 && !huntEndedBySchedule;
   const registeredCount = registrations.length;
 
   // Derived from hunt_registrations: disable Join button and show avatar when user has joined
@@ -440,6 +443,7 @@ function LobbyPageInner() {
   // Handle registration
   async function handleRegister() {
     if (!activeHunt || !currentUserId || isRegistered || registering) return;
+    if (activeHunt.end_date && isHuntPastEndDate(activeHunt.end_date)) return;
 
     setRegistering(true);
     try {
@@ -720,7 +724,11 @@ function LobbyPageInner() {
             {/* Big button: Join Hunt (register) or Start Hunting (enter when joined + live) */}
             <div className="space-y-3">
               {activeHunt ? (
-                isRegistered ? (
+                huntEndedBySchedule ? (
+                  <div className="w-full py-7 rounded-2xl font-black text-lg sm:text-xl uppercase tracking-[0.15em] bg-slate-100 text-slate-600 border-2 border-slate-200 text-center px-3">
+                    This hunt has ended — check back for the next one
+                  </div>
+                ) : isRegistered ? (
                   huntIsLive ? (
                     <Link
                       href={`/hunt/${activeHunt.id}`}
@@ -741,7 +749,7 @@ function LobbyPageInner() {
                   <button
                     type="button"
                     onClick={handleRegister}
-                    disabled={registering}
+                    disabled={registering || huntEndedBySchedule}
                     className="block w-full py-7 rounded-2xl font-black text-xl uppercase tracking-[0.2em] bg-[#0F172A] text-white hover:bg-[#2563EB] hover:scale-[1.02] active:scale-[0.98] transition-all shadow-2xl shadow-[#0F172A]/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   >
                     {registering ? (
@@ -767,11 +775,13 @@ function LobbyPageInner() {
               <p className="text-[11px] text-slate-400">
                 {!activeHunt
                   ? "No hunt scheduled."
-                  : huntIsLive && isRegistered
-                    ? "Hunt is live. Enter above."
-                    : huntIsLive && !isRegistered
-                      ? "Join above to enter the hunt."
-                      : "... waiting for lobby to fill ..."}
+                  : huntEndedBySchedule
+                    ? "The scheduled hunt window is closed."
+                    : huntIsLive && isRegistered
+                      ? "Hunt is live. Enter above."
+                      : huntIsLive && !isRegistered
+                        ? "Join above to enter the hunt."
+                        : "... waiting for lobby to fill ..."}
               </p>
             </div>
 

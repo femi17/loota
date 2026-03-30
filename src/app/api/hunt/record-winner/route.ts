@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   const admin = createServiceRoleClient();
 
   const [{ data: hunt }, { data: reg }, { data: pos }] = await Promise.all([
-    admin.from("hunts").select("id, keys_to_win").eq("id", huntId).maybeSingle(),
+    admin.from("hunts").select("id, keys_to_win, status").eq("id", huntId).maybeSingle(),
     admin
       .from("hunt_registrations")
       .select("keys_earned")
@@ -56,6 +56,10 @@ export async function POST(request: NextRequest) {
 
   if (!hunt) {
     return NextResponse.json({ error: "Hunt not found" }, { status: 404 });
+  }
+
+  if ((hunt as { status?: string }).status && (hunt as { status: string }).status !== "active") {
+    return NextResponse.json({ error: "This hunt is no longer active" }, { status: 403 });
   }
 
   const requiredKeys = Math.max(

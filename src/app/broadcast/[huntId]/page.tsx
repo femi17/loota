@@ -14,6 +14,7 @@ import {
   type RegionMapView,
 } from "@/lib/region-map-view";
 import { addMapboxTrafficLayer } from "@/lib/mapbox-traffic-layer";
+import { isHuntPastEndDate } from "@/lib/hunt-schedule";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 type LngLat = { lng: number; lat: number };
@@ -1479,6 +1480,8 @@ export default function BroadcastPage() {
     region_name: string | null;
     waypoints: Array<{ label?: string; lng: number; lat: number }> | null;
     questions: Array<{ id?: string; category?: string }>;
+    end_date: string | null;
+    status: "active" | "completed" | string;
   } | null>(null);
   /** Map framing from hunt state/region — never from clue waypoints. */
   const [regionMapView, setRegionMapView] = useState<RegionMapView | null>(null);
@@ -1520,6 +1523,15 @@ export default function BroadcastPage() {
   /** Drives on-air quiz countdown UI. */
   const [quizBroadcastTick, setQuizBroadcastTick] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  /** Seconds remaining until hunt.end_date; null if no end date. */
+  const [secondsUntilHuntEnd, setSecondsUntilHuntEnd] = useState<number | null>(null);
+  const [endScreen, setEndScreen] = useState<{
+    title: string;
+    hasWinners: boolean;
+    winners: { name: string; keys: number }[];
+  } | null>(null);
+  const finalizeBroadcastOnceRef = useRef<string | null>(null);
+  const broadcastEndFetchKeyRef = useRef<string>("");
 
   // Fixed schedule: we show one player for 60 seconds, unless a newer event forces a jump.
   const focusSwitchEndsAtRef = useRef<number>(0);
@@ -1561,9 +1573,9 @@ export default function BroadcastPage() {
       try {
         let huntRes = await supabase
           .from("hunts")
-          .select("id, title, keys_to_win, region_name, hunt_location, waypoints, questions")
+          .select("id, title, keys_to_win, region_name, hunt_location, waypoints, questions, end_date, status")
           .eq("id", huntId)
-          .eq("status", "active")
+          .in("status", ["active", "completed"])
           .maybeSingle();
 
         if (
@@ -1572,9 +1584,9 @@ export default function BroadcastPage() {
         ) {
           huntRes = await supabase
             .from("hunts")
-            .select("id, title, keys_to_win, region_name, waypoints, questions")
+            .select("id, title, keys_to_win, region_name, waypoints, questions, end_date, status")
             .eq("id", huntId)
-            .eq("status", "active")
+            .in("status", ["active", "completed"])
             .maybeSingle();
         }
 
@@ -1589,7 +1601,7 @@ export default function BroadcastPage() {
           setError(
             huntErr && isSupabaseMissingColumnError(huntErr)
               ? `Database is missing hunt columns (e.g. region_name / waypoints). Run migrations in database_migrations/.`
-              : `Hunt not found or not active.${hint}`
+              : `Hunt not found or not available for broadcast.${hint}`
           );
           setRegionMapView(null);
           setLoading(false);
@@ -1616,6 +1628,13 @@ export default function BroadcastPage() {
 
         regionSpawnBaseRef.current = { ...view.center };
 
+        const endRaw = row.end_date;
+        const end_date =
+          typeof endRaw === "string" && endRaw.trim() ? endRaw.trim() : null;
+        const st = row.status;
+        const status =
+          st === "completed" ? "completed" : st === "active" ? "active" : String(st ?? "active");
+
         setHunt({
           id: String(huntData.id),
           title: String(huntData.title ?? ""),
@@ -1626,6 +1645,8 @@ export default function BroadcastPage() {
             ? (row.waypoints as Array<{ label?: string; lng: number; lat: number }>)
             : null,
           questions: Array.isArray(huntData.questions) ? huntData.questions : [],
+          end_date,
+          status,
         });
         setRegionMapView(view);
         setError(null);
@@ -1655,7 +1676,98 @@ export default function BroadcastPage() {
     quizSpotlightLockedPlayerIdRef.current = null;
     setFocusPlayerId("");
     setPlayerPositionsTableEmpty(null);
+    finalizeBroadcastOnceRef.current = null;
+    broadcastEndFetchKeyRef.current = "";
+    setEndScreen(null);
+    setSecondsUntilHuntEnd(null);
   }, [huntId]);
+
+  // Countdown to hunt end (top UI).
+  useEffect(() => {
+    if (!hunt?.end_date) {
+      setSecondsUntilHuntEnd(null);
+      return;
+    }
+    const tick = () => {
+      const end = new Date(hunt.end_date as string).getTime();
+      if (!Number.isFinite(end)) {
+        setSecondsUntilHuntEnd(null);
+        return;
+      }
+      setSecondsUntilHuntEnd(Math.max(0, Math.floor((end - Date.now()) / 1000)));
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+  }, [hunt?.end_date]);
+
+  // When the hunt is over (by schedule or status): finalize once, then load winner list for overlay (once per hunt end).
+  useEffect(() => {
+    if (!huntId || !hunt) return;
+    const byCountdown =
+      hunt.status === "active" &&
+      hunt.end_date != null &&
+      secondsUntilHuntEnd != null &&
+      secondsUntilHuntEnd <= 0;
+    const shouldEnd =
+      hunt.status === "completed" ||
+      byCountdown ||
+      (Boolean(hunt.end_date) && isHuntPastEndDate(hunt.end_date));
+    if (!shouldEnd) {
+      broadcastEndFetchKeyRef.current = "";
+      setEndScreen(null);
+      return;
+    }
+
+    const fetchKey = `${huntId}:ended`;
+    if (broadcastEndFetchKeyRef.current === fetchKey) return;
+    broadcastEndFetchKeyRef.current = fetchKey;
+
+    let cancelled = false;
+    (async () => {
+      if (hunt.status === "active" && finalizeBroadcastOnceRef.current !== huntId) {
+        finalizeBroadcastOnceRef.current = huntId;
+        try {
+          await fetch("/api/hunt/finalize-hunt-end", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hunt_id: huntId }),
+          });
+        } catch {
+          // ignore; summary may still reflect partial state
+        }
+      }
+
+      try {
+        const res = await fetch(
+          `/api/hunt/broadcast-summary?hunt_id=${encodeURIComponent(huntId)}&_=${Date.now()}`
+        );
+        const data = (await res.json().catch(() => null)) as {
+          title?: string;
+          hasWinners?: boolean;
+          winners?: { name: string; keys: number }[];
+        } | null;
+        if (cancelled || !res.ok || !data) return;
+        setEndScreen({
+          title: typeof data.title === "string" ? data.title : "Loota Hunt",
+          hasWinners: Boolean(data.hasWinners),
+          winners: Array.isArray(data.winners) ? data.winners : [],
+        });
+      } catch {
+        if (!cancelled) {
+          setEndScreen({
+            title: hunt.title ?? "Loota Hunt",
+            hasWinners: false,
+            winners: [],
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [huntId, hunt, hunt?.status, hunt?.end_date, hunt?.title, secondsUntilHuntEnd]);
 
   useEffect(() => {
     if (!focusPlayerId) return;
@@ -3461,6 +3573,28 @@ export default function BroadcastPage() {
       ? `Other lootas ${(otherFeedIndex % otherPlayersFeedLines.length) + 1}/${otherPlayersFeedLines.length}`
       : null;
 
+  const showHuntEndOverlay =
+    hunt != null &&
+    (hunt.status === "completed" ||
+      (Boolean(hunt.end_date) && isHuntPastEndDate(hunt.end_date)));
+
+  const showHuntCountdown =
+    hunt != null &&
+    hunt.status === "active" &&
+    Boolean(hunt.end_date) &&
+    secondsUntilHuntEnd != null &&
+    secondsUntilHuntEnd > 0;
+
+  const huntCountdownLabel = (() => {
+    if (secondsUntilHuntEnd == null || secondsUntilHuntEnd <= 0) return "";
+    const sec = secondsUntilHuntEnd;
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  })();
+
   return (
     <div className="h-screen bg-[#0F172A] text-white overflow-hidden flex flex-col">
       <main className="flex-1 relative min-h-0">
@@ -3510,19 +3644,35 @@ export default function BroadcastPage() {
         })()}
 
         <header className="absolute top-0 left-0 right-0 z-20 pointer-events-none">
-          <div className="m-4 flex items-center justify-between gap-3">
-            <div className="pointer-events-auto rounded-2xl border border-slate-200 bg-white/95 backdrop-blur-md px-5 py-3 text-slate-900 shadow-lg">
-              <div className="flex items-center gap-3">
-                <img src="/logo.png" alt="Loota" className="h-11 w-auto object-contain sm:h-[52px]" />
-                <div>
-                  <p className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-500">
+          <div className="relative m-3 sm:m-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+            <div className="pointer-events-auto rounded-2xl border border-slate-200 bg-white/95 backdrop-blur-md px-3 py-2.5 sm:px-5 sm:py-3 text-slate-900 shadow-lg max-w-[min(100%,11rem)] sm:max-w-[42%] shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <img src="/logo.png" alt="Loota" className="h-9 w-auto object-contain sm:h-[52px]" />
+                <div className="min-w-0">
+                  <p className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-slate-500 truncate">
                     {hunt?.region_name ?? "Nigeria"}
                   </p>
-                  <p className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 leading-tight">{hunt?.title ?? "Loota Hunt"}</p>
+                  <p className="text-base sm:text-2xl font-black tracking-tight text-slate-900 leading-tight line-clamp-2">
+                    {hunt?.title ?? "Loota Hunt"}
+                  </p>
                 </div>
               </div>
             </div>
-            <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 backdrop-blur-md px-3 py-2 text-slate-900">
+
+            {showHuntCountdown ? (
+              <div className="pointer-events-none absolute left-1/2 top-0 z-30 w-[min(100%,280px)] sm:w-auto -translate-x-1/2 px-2">
+                <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-2.5 text-center shadow-lg ring-1 ring-amber-500/20">
+                  <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                    Hunt ends in
+                  </p>
+                  <p className="mt-0.5 text-lg sm:text-2xl font-black tabular-nums tracking-tight text-white">
+                    {huntCountdownLabel}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-slate-200 bg-white/95 backdrop-blur-md px-2 py-2 sm:px-3 text-slate-900 sm:max-w-[42%] sm:ml-auto">
               <select
                 value={focusPlayerId}
                 onChange={(e) => {
@@ -3539,18 +3689,26 @@ export default function BroadcastPage() {
                     setFocusPlayerId(v);
                   }
                 }}
-                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-slate-300 min-w-[160px]"
+                className="px-2 py-1.5 sm:px-3 rounded-lg bg-white border border-slate-300 text-slate-900 text-[11px] sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-slate-300 min-w-0 flex-1 sm:flex-none sm:min-w-[140px]"
               >
                 <option value="">Show all on map</option>
                 {players.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-600/90 text-[10px] font-black uppercase tracking-widest text-white">
-                <span className="size-1.5 rounded-full bg-white animate-pulse" />
-                LIVE
-              </span>
-              <Link href="/" className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900">Exit</Link>
+              {showHuntEndOverlay ? (
+                <span className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-600/95 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white whitespace-nowrap">
+                  Ended
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-600/90 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white whitespace-nowrap">
+                  <span className="size-1.5 rounded-full bg-white animate-pulse shrink-0" />
+                  LIVE
+                </span>
+              )}
+              <Link href="/" className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 whitespace-nowrap px-1">
+                Exit
+              </Link>
             </div>
           </div>
         </header>
@@ -3629,6 +3787,59 @@ export default function BroadcastPage() {
             {focusQuizCopy ? (
               <p className="mt-1 text-[11px] leading-relaxed text-blue-700">{focusQuizCopy}</p>
             ) : null}
+          </div>
+        ) : null}
+
+        {showHuntEndOverlay ? (
+          <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-auto bg-slate-950/85 backdrop-blur-sm px-3 py-6 sm:px-6 overflow-y-auto overscroll-contain">
+            <div className="w-full max-w-md rounded-3xl border border-emerald-500/25 bg-gradient-to-b from-slate-900 to-slate-950 p-5 sm:p-8 text-center shadow-2xl my-auto">
+              <p className="text-[10px] sm:text-[11px] font-black uppercase tracking-[0.35em] text-emerald-400/90">
+                Hunt finished
+              </p>
+              <h2 className="mt-2 text-xl sm:text-2xl font-black text-white leading-tight">
+                {endScreen?.title ?? hunt?.title ?? "Loota Hunt"}
+              </h2>
+              {!endScreen ? (
+                <p className="mt-6 text-sm text-white/70">Finalizing results…</p>
+              ) : endScreen.hasWinners && endScreen.winners.length > 0 ? (
+                <div className="mt-6 text-left">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-white/50 text-center mb-3">
+                    Winners
+                  </p>
+                  <ul className="space-y-2 max-h-[min(40vh,280px)] overflow-y-auto pr-1">
+                    {endScreen.winners.map((w, i) => (
+                      <li
+                        key={`${w.name}-${i}`}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm"
+                      >
+                        <span className="font-bold text-white truncate min-w-0">{w.name}</span>
+                        <span className="shrink-0 text-xs font-black text-emerald-300 tabular-nums">
+                          {w.keys} keys
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="mt-6 text-sm sm:text-base text-white/80 leading-relaxed">
+                  No one reached the key goal before time ran out. Join the next hunt from the lobby.
+                </p>
+              )}
+              <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+                <Link
+                  href="/lobby"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black uppercase tracking-widest text-slate-950 hover:bg-emerald-400 transition-colors"
+                >
+                  Next hunt — Lobby
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-white/20 px-5 py-3 text-sm font-bold text-white/90 hover:bg-white/10 transition-colors"
+                >
+                  Home
+                </Link>
+              </div>
+            </div>
           </div>
         ) : null}
 

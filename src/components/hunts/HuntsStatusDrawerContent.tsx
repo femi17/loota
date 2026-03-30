@@ -133,6 +133,8 @@ function NextQuizAtLocation({
 type Props = {
   /** When false, show a locked message instead of keys/position/wallet etc. */
   huntHasStarted?: boolean;
+  /** When true (past scheduled end_date), gameplay is closed. */
+  huntHasEnded?: boolean;
   huntPhase: HuntPhase;
   keys: number;
   keysToWin: number;
@@ -231,6 +233,7 @@ type Props = {
 
 export function HuntsStatusDrawerContent({
   huntHasStarted = true,
+  huntHasEnded = false,
   huntPhase,
   keys,
   keysToWin,
@@ -389,6 +392,24 @@ export function HuntsStatusDrawerContent({
           </p>
           <p className="mt-2 text-sm text-slate-600 leading-relaxed">
             Your keys, position, wallet and travel mode will appear here when the countdown reaches zero.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (huntHasEnded) {
+    return (
+      <div className="space-y-5">
+        <div className="p-5 rounded-3xl bg-slate-100 border border-slate-200">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">
+            Hunt ended
+          </p>
+          <p className="mt-2 text-sm font-semibold text-[#0F172A]">
+            This hunt is over — the scheduled end time has passed.
+          </p>
+          <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+            Head to the lobby to join the next hunt.
           </p>
         </div>
       </div>

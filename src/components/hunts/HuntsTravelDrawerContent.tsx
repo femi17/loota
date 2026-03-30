@@ -25,6 +25,7 @@ export type BaseDirs = {
 type Props = {
   /** When false, destination and Go are locked until the hunt officially starts. */
   huntHasStarted?: boolean;
+  huntHasEnded?: boolean;
   pendingDestination: LngLat | null;
   destination: LngLat | null;
   pendingDestinationLabel: string;
@@ -72,6 +73,7 @@ type Props = {
 
 export function HuntsTravelDrawerContent({
   huntHasStarted = true,
+  huntHasEnded = false,
   pendingDestination,
   destination,
   pendingDestinationLabel,
@@ -130,6 +132,24 @@ export function HuntsTravelDrawerContent({
           </p>
           <p className="mt-2 text-sm text-slate-600 leading-relaxed">
             The first location and travel options will unlock when the countdown reaches zero. You can stay on the map until then.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (huntHasEnded) {
+    return (
+      <div className="space-y-4">
+        <div className="p-5 rounded-3xl bg-slate-100 border border-slate-200">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">
+            Travel closed
+          </p>
+          <p className="mt-2 text-sm font-semibold text-[#0F172A]">
+            This hunt has ended.
+          </p>
+          <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+            Open the lobby for the next hunt.
           </p>
         </div>
       </div>

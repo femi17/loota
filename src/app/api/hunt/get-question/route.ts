@@ -5,6 +5,7 @@ import { generateQuestion } from "@/lib/openai";
 import { logger } from "@/lib/logger";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { TASK_TIME_SECONDS } from "@/app/hunts/constants";
+import { isHuntPastEndDate } from "@/lib/hunt-schedule";
 
 type DifficultyDist = { easy?: number; medium?: number; hard?: number };
 type ServedRow = { question_text: string | null };
@@ -103,13 +104,21 @@ export async function GET(request: NextRequest) {
 
   const { data: hunt, error: huntError } = await supabase
     .from("hunts")
-    .select("id, question_categories, difficulty_distribution")
+    .select("id, question_categories, difficulty_distribution, end_date")
     .eq("id", huntId)
     .eq("status", "active")
     .single();
 
   if (huntError || !hunt) {
     return NextResponse.json({ error: "Hunt not found or not active" }, { status: 404 });
+  }
+
+  const endD = (hunt as { end_date?: string | null }).end_date;
+  if (isHuntPastEndDate(endD ?? null)) {
+    return NextResponse.json(
+      { error: "This hunt has ended. Questions are no longer available." },
+      { status: 403 }
+    );
   }
 
   const userId = auth.user.id;

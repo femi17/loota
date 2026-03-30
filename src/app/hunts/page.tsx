@@ -128,6 +128,7 @@ import { HuntsPlaneDrawerContent } from "@/components/hunts/HuntsPlaneDrawerCont
 import { HuntsInventoryDrawerContent } from "@/components/hunts/HuntsInventoryDrawerContent";
 import { HuntsCoinsDrawerContent } from "@/components/hunts/HuntsCoinsDrawerContent";
 import { HuntsCountdownOverlay } from "@/components/hunts/HuntsCountdownOverlay";
+import { HuntsHuntEndedOverlay } from "@/components/hunts/HuntsHuntEndedOverlay";
 import { HuntsStopGatewayButton } from "@/components/hunts/HuntsStopGatewayButton";
 import {
   makeAvatarEl,
@@ -156,7 +157,7 @@ export default function HuntsPage() {
     drawer, setDrawer, resumeDrawerRef, navNotifications, setNavNotifications, shopError, setShopError, payError, setPayError,
     paystackLoading, setPaystackLoading, huntLeaderboard, setHuntLeaderboard, leaderboardLoading, setLeaderboardLoading,
     initialCreditsRef, activeHunt, setActiveHunt, activeHuntId, setActiveHuntId, isRegisteredForHunt, secondsUntilStart,
-    huntFetchDone, huntHasStarted, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
+    huntFetchDone, huntHasStarted, huntHasEnded, canPlayHunt, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
     playerPositionsHydrated,
     travelMode, travelPickModeId, setTravelPickModeId, startLocation, publicLocation, publicLocationLabel, currentWaypoint,
     playerPos, setPlayerPos, userCountry, setUserCountry, locationIsApproximate, setLocationIsApproximate, destination, setDestination,
@@ -1110,7 +1111,7 @@ export default function HuntsPage() {
   }, [activeHuntId, keys]);
 
   useEffect(() => {
-    if (!huntHasStarted || !activeHuntId || !activeHunt) return;
+    if (!canPlayHunt || !activeHuntId || !activeHunt) return;
     const prev = lastChapterKeysRef.current;
     if (keys <= prev) {
       lastChapterKeysRef.current = keys;
@@ -1133,7 +1134,7 @@ export default function HuntsPage() {
       setToast({ title: "Story beat", message });
     }, 550);
     return () => window.clearTimeout(t);
-  }, [keys, huntHasStarted, activeHuntId, activeHunt, setToast]);
+  }, [keys, canPlayHunt, activeHuntId, activeHunt, setToast]);
 
   function openDrawer(next: DrawerId) {
     // If the player is in the middle of choosing a trip, keep a way back after shopping.
@@ -2867,7 +2868,7 @@ export default function HuntsPage() {
     if (!map || !mapReady || !mapboxgl?.Marker) return;
     const Marker = mapboxgl.Marker;
 
-    if (!huntHasStarted) {
+    if (!canPlayHunt) {
       if (destinationMarkerRef.current) {
         try {
           destinationMarkerRef.current.remove?.();
@@ -3058,7 +3059,7 @@ export default function HuntsPage() {
       }
     }
   }, [
-    huntHasStarted,
+    canPlayHunt,
     mapReady,
     keys,
     activeHunt?.waypoints,
@@ -5249,21 +5250,21 @@ export default function HuntsPage() {
   useEffect(() => {
     const prev = prevDrawerForTravelRef.current;
     prevDrawerForTravelRef.current = drawer;
-    if (!huntHasStarted) return;
+    if (!canPlayHunt) return;
     if (prev !== "travel" && drawer === "travel" && !pendingDestination && nextCheckpointForTravel) {
       setPendingDestination(nextCheckpointForTravel.to);
       setPendingDestinationLabel(nextCheckpointForTravel.label);
     }
-  }, [drawer, nextCheckpointForTravel, pendingDestination, huntHasStarted]);
+  }, [drawer, nextCheckpointForTravel, pendingDestination, canPlayHunt]);
 
   // If Travel or Destination is open when the player enters a mandatory checkpoint zone, switch to Status (quiz/task).
   useEffect(() => {
-    if (!huntHasStarted) return;
+    if (!canPlayHunt) return;
     if (!arrivedForChallenge && !isAtCurrentWaypoint) return;
     if (drawer === "travel" || drawer === "destination") {
       setDrawer("status");
     }
-  }, [drawer, huntHasStarted, arrivedForChallenge, isAtCurrentWaypoint]);
+  }, [drawer, canPlayHunt, arrivedForChallenge, isAtCurrentWaypoint]);
 
   // Ensure we only emit the "avatar_before_go" debug log once per travel-drawer open.
   const hasLoggedHuntsBeforeGoRef = useRef(false);
@@ -6316,6 +6317,7 @@ export default function HuntsPage() {
               show={Boolean(isRegisteredForHunt && !huntHasStarted && secondsUntilStart != null)}
               secondsUntilStart={secondsUntilStart ?? 0}
             />
+            <HuntsHuntEndedOverlay show={Boolean(isRegisteredForHunt && huntHasEnded)} />
           </div>,
           document.body
         )}
@@ -6327,7 +6329,7 @@ export default function HuntsPage() {
         tokensIcon="groups"
         onMapClick={() => {
           if (isUserCompletedHunt) return;
-          if (!huntHasStarted) {
+          if (!canPlayHunt) {
             setDrawer("status");
             return;
           }
@@ -6371,7 +6373,7 @@ export default function HuntsPage() {
         }
         onOpenTravel={() => {
           if (isUserCompletedHunt) return;
-          if (!huntHasStarted) {
+          if (!canPlayHunt) {
             setDrawer("status");
             return;
           }
@@ -6397,14 +6399,14 @@ export default function HuntsPage() {
           }
         }}
         onOpenInventory={() => {
-          if (!huntHasStarted) {
+          if (!canPlayHunt) {
             setDrawer("status");
             return;
           }
           openDrawer("inventory");
         }}
         onOpenGarage={() => {
-          if (!huntHasStarted) {
+          if (!canPlayHunt) {
             setDrawer("status");
             return;
           }
@@ -7038,6 +7040,7 @@ export default function HuntsPage() {
             {drawer === "status" ? (
               <HuntsStatusDrawerContent
                 huntHasStarted={huntHasStarted}
+                huntHasEnded={huntHasEnded}
                 huntPhase={huntPhase}
                 keys={keys}
                 keysToWin={keysToWin}
@@ -7171,6 +7174,7 @@ export default function HuntsPage() {
             {drawer === "travel" ? (
               <HuntsTravelDrawerContent
                 huntHasStarted={huntHasStarted}
+                huntHasEnded={huntHasEnded}
                 pendingDestination={pendingDestination}
                 destination={destination}
                 pendingDestinationLabel={pendingDestinationLabel}

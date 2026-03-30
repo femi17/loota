@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server-auth";
 import { validateQuizAnswer } from "@/lib/openai";
 import { logger } from "@/lib/logger";
+import { isHuntPastEndDate } from "@/lib/hunt-schedule";
 
 /**
  * POST /api/hunt/validate-answer
@@ -57,11 +58,18 @@ export async function POST(request: NextRequest) {
 
     const { data: hunt, error: huntErr } = await supabase
       .from("hunts")
-      .select("id, status, questions")
+      .select("id, status, questions, end_date")
       .eq("id", huntId)
       .single();
     if (huntErr || !hunt || hunt.status !== "active") {
       return NextResponse.json({ error: "Hunt not found or not active" }, { status: 404 });
+    }
+    const endD = (hunt as { end_date?: string | null }).end_date;
+    if (isHuntPastEndDate(endD ?? null)) {
+      return NextResponse.json(
+        { error: "This hunt has ended. No more quiz answers can be submitted." },
+        { status: 403 }
+      );
     }
     const { data: registration } = await supabase
       .from("hunt_registrations")
