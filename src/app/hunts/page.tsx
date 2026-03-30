@@ -198,6 +198,7 @@ export default function HuntsPage() {
   const trafficSuggestKeyRef = useRef<string>("");
   const [trafficSuggestOpen, setTrafficSuggestOpen] = useState(false);
   const [strandedVehicleTick, setStrandedVehicleTick] = useState(0);
+  const [mobileHuntEndOpen, setMobileHuntEndOpen] = useState(false);
 
   const [gatewayActionLoading, setGatewayActionLoading] = useState(false);
   const winnerRecordedRef = useRef<string | null>(null);
@@ -6507,24 +6508,57 @@ export default function HuntsPage() {
               secondsUntilStart={secondsUntilStart ?? 0}
             />
             {canPlayHunt && secondsUntilEnd != null ? (
-              <div className="pointer-events-none absolute left-1/2 top-16 z-30 w-[min(100%,280px)] -translate-x-1/2 px-2 sm:top-4 sm:w-auto">
-                <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-2.5 text-center shadow-lg ring-1 ring-amber-500/20">
-                  <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
-                    Hunt ends in
-                  </p>
-                  <p className="mt-0.5 text-lg sm:text-2xl font-black tabular-nums tracking-tight text-white">
-                    {(() => {
-                      const sec = Math.max(0, Math.floor(secondsUntilEnd));
-                      const h = Math.floor(sec / 3600);
-                      const m = Math.floor((sec % 3600) / 60);
-                      const s = sec % 60;
-                      return h > 0
-                        ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-                        : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-                    })()}
-                  </p>
+              <>
+                {/* Desktop/tablet: centered countdown pill */}
+                <div className="pointer-events-none absolute left-1/2 top-4 z-30 hidden sm:block -translate-x-1/2">
+                  <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-4 py-2.5 text-center shadow-lg ring-1 ring-amber-500/20">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                      Hunt ends in
+                    </p>
+                    <p className="mt-0.5 text-2xl font-black tabular-nums tracking-tight text-white">
+                      {(() => {
+                        const sec = Math.max(0, Math.floor(secondsUntilEnd));
+                        const h = Math.floor(sec / 3600);
+                        const m = Math.floor((sec % 3600) / 60);
+                        const s = sec % 60;
+                        return h > 0
+                          ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+                          : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+                      })()}
+                    </p>
+                  </div>
                 </div>
-              </div>
+
+                {/* Mobile: hourglass toggle near header */}
+                <button
+                  type="button"
+                  onClick={() => setMobileHuntEndOpen((v) => !v)}
+                  className="pointer-events-auto absolute top-16 right-4 z-30 sm:hidden inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white/95 backdrop-blur-md shadow-md h-11 w-11 active:scale-[0.98]"
+                  aria-label="Show hunt end countdown"
+                >
+                  <span className="material-symbols-outlined text-[22px] text-slate-900">hourglass_empty</span>
+                </button>
+                {mobileHuntEndOpen ? (
+                  <div className="pointer-events-none absolute left-1/2 top-16 z-30 w-[min(100%,240px)] -translate-x-1/2 px-2 sm:hidden">
+                    <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-2.5 py-2 text-center shadow-lg ring-1 ring-amber-500/20">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                        Ends in
+                      </p>
+                      <p className="mt-0.5 text-lg font-black tabular-nums tracking-tight text-white">
+                        {(() => {
+                          const sec = Math.max(0, Math.floor(secondsUntilEnd));
+                          const h = Math.floor(sec / 3600);
+                          const m = Math.floor((sec % 3600) / 60);
+                          const s = sec % 60;
+                          return h > 0
+                            ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+                            : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : null}
             <HuntsHuntEndedOverlay show={Boolean(isRegisteredForHunt && huntHasEnded)} />
           </div>,
