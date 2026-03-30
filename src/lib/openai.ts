@@ -6,33 +6,26 @@ export const openai = new OpenAI({
 });
 
 /**
- * Street-quiz style categories that resonate with viral "street interview" and
- * "Are You Smarter Than a Fifth Grader?" content. Used to steer both hunt config
- * and question generation toward engaging, shareable general-knowledge questions.
- * See docs/QUIZ_QUESTIONS.md for research and prompt design.
+ * Loota hunts use exactly four categories, rotated per waypoint (see `hunt-quiz-categories.ts`).
+ * Prompts in generateQuestion must stay aligned with these names.
  */
 export const STREET_QUIZ_CATEGORY_HINTS = [
-  "Simple math (basic arithmetic, algebra, percentages, fractions, simple number patterns)",
-  "General knowledge (facts, geography, culture, history, science)",
-  "Viral & internet trends (Nigeria-focused: memes, slang, creators, what is trending online in Nigeria)",
-  "Nigeria culture (music, slang, places, food, celebrities, Afrobeats)",
-  "Guess the flag (show a flag image URL and ask the country)",
-  "Quick trivia (one-line facts, pop culture)",
-  "Word play (puns, fill-in-the-blank)",
-  "Music & lyrics (song lines, artist names)",
-  "Sports (football, Olympics, fun facts)",
-  "Food & drink (dishes, ingredients)",
-  "Movies & TV (quotes, characters, Nollywood)",
-  "Logic puzzles (simple deductive)",
-  "Number games (sequences, what comes next)",
-  "Nature & animals (fun facts)",
-  "Geography (cities, landmarks, capitals)",
-  "Acronyms & abbreviations (CEO, WWW, H2O, etc.)",
-  "Celebrities & names (who said it, who's this?)",
-  "Slang & phrases (street talk, local expressions)",
-  "Fill in the blank (complete the phrase/song)",
-  "This or that (quick which-one choices)",
+  "Math — basic arithmetic, percentages, fractions, simple patterns (mental math)",
+  "General Knowledge — world facts, geography, science, culture, history (no app/game trivia)",
+  "Guess the logo — Clearbit logo URL + which brand",
+  "Guess the flag — FlagCDN flag URL + which country",
 ] as const;
+
+type QuizKind = "math" | "general_knowledge" | "guess_the_logo" | "guess_the_flag";
+
+function classifyQuizCategory(topic: string): QuizKind {
+  const t = topic.trim().toLowerCase();
+  if (t.includes("guess the flag")) return "guess_the_flag";
+  if (t.includes("guess the logo")) return "guess_the_logo";
+  if (t === "math" || /\bmath\b/.test(t)) return "math";
+  if (t.includes("general knowledge") || t === "general knowledge") return "general_knowledge";
+  return "general_knowledge";
+}
 
 type GeneratedQuestion = { question: string; answer: string; options?: string[] };
 
@@ -81,7 +74,8 @@ Validation rules:
 - The marked answer must exactly match one option.
 - Reject if the question is ambiguous, has multiple plausible correct answers, or is misleading.
 - For math questions, compute the result; do not infer by option patterns.
-- For "Simple math", allow variety (arithmetic, algebra, percentages, fractions, simple patterns), not only one type.
+- For "Guess the flag" / FlagCDN questions: the question text MUST contain a line "Flag: https://flagcdn.com/..." and the answer must match that flag's country.
+- For "Guess the logo" / Clearbit questions: the question text MUST contain a line "Logo: https://logo.clearbit.com/..." and the answer must match that brand.
 - For person/country identity facts (e.g. nationality), verify against real-world facts.
 - First derive the answer independently from world knowledge or calculation, then compare to the marked answer.
 - If uncertain, set valid=false and confidence="low".
@@ -130,6 +124,7 @@ export async function generateQuestion(
   context?: string,
   excludeQuestions: string[] = []
 ): Promise<GeneratedQuestion> {
+  const kind = classifyQuizCategory(topic);
   const difficultyPrompt =
     difficulty === "easy"
       ? "simple and straightforward—the kind people answer in one breath"
@@ -144,6 +139,7 @@ export async function generateQuestion(
 CRITICAL - No question may ever be repeated in this hunt. The list below is every question already asked (any step, any category, any player). You MUST generate a completely different question.
 - Do NOT repeat, rephrase, or ask the SAME FACT in different words (e.g. "capital of France" vs "France's capital" = same fact).
 - Pick a different sub-topic, fact, date, place, or example within the category.
+- For logo/flag rounds, pick a DIFFERENT country code or brand domain than in any prior question.
 - Fairness depends on zero duplicates and zero same-fact variants across the entire hunt.
 
 Questions already used in this hunt (do NOT use or closely mimic any of these):
@@ -152,36 +148,55 @@ ${excludeQuestions.slice(0, 800).map((q) => `- "${q.replace(/"/g, "'")}"`).join(
 
 Uniqueness: Generate a fresh, original question. Vary the specific sub-topic (e.g. different facts, dates, or examples within the category). Do not ask the same fact as another question in different wording.`;
 
-  const prompt = `Category: "${topic}". Generate a ${difficultyPrompt} street-quiz style question.${uniquenessBlock}
-
-CRITICAL - Category scope: The question MUST be solely and clearly about this category. No mixing.
-- For "Simple math" (or "math"): allow variety across basic arithmetic, simple algebra, percentages, fractions, and simple number patterns. Keep it short and solvable mentally; no advanced formulas.
-- For "Guess the flag" (or if the category contains "flag"): you MUST include a single flag image URL from FlagCDN in the question text in this exact format:
+  const categoryInstructions =
+    kind === "math"
+      ? `Category: Math (mental math only).
+- Ask ONE clear ${difficultyPrompt} math problem: arithmetic, percentages, fractions, simple patterns, or very simple algebra.
+- No calculators needed; answer must be a short number or fraction (e.g. "47", "3/4", "40").
+- "question" field must be ONLY the math problem text (no image lines).`
+      : kind === "general_knowledge"
+        ? `Category: General Knowledge.
+- Ask ONE ${difficultyPrompt} trivia question about real-world facts (geography, science, history, culture, sports).
+- Do NOT ask about this app, Loota, or game mechanics.
+- "question" must be a single sentence ending with ?`
+        : kind === "guess_the_flag"
+          ? `Category: Guess the flag.
+- Put the FIRST line of "question" EXACTLY as:
   Flag: https://flagcdn.com/w320/{cc}.png
-  where {cc} is a real ISO 3166-1 alpha-2 lowercase country code (e.g. ng, gh, us, fr).
-  The question must be: "Which country is this flag?" (or equivalent).
-  Options must be 4 country names. The correct answer must be the correct country for that flag and must match one option exactly.
-- For "Geography" (or "cities", "capitals"): ONLY places, capitals, landmarks, countries. The correct answer must be the actual fact (e.g. capital of France = Paris, not Madrid or Rome).
-- For "Viral & internet trends" (or "viral", "internet trends"): ONLY Nigerian internet culture—memes, slang, challenges, creators, hashtags, or platforms as they matter in Nigeria. Do not center US-only or generic Western viral topics unless clearly tied to Nigeria.
-- For any other category: stay strictly within that topic. If the category is "Music", do not ask a geography question.
+  where {cc} is a real ISO 3166-1 alpha-2 lowercase country code (e.g. ng, ke, gh, za, fr).
+- Then on the next line: "Which country is this flag?" (or equivalent).
+- Options: exactly 4 real country names; "answer" must be the exact country name for that flag and must match one option.`
+          : `Category: Guess the logo.
+- Put the FIRST line of "question" EXACTLY as:
+  Logo: https://logo.clearbit.com/{domain}
+  where {domain} is a well-known global brand's website domain (e.g. nike.com, apple.com, spotify.com, mcdonalds.com). Use a diverse, recognizable brand.
+- Then on the next line: "Which brand's logo is this?" (or equivalent).
+- Options: exactly 4 distinct brand/company names; "answer" must be the brand that owns that domain and must match one option exactly.
+- Do NOT use placeholder domains; use real logos served by Clearbit.`;
 
-Style (street interview / viral quiz): One clear sentence, quick to read. Draw from general knowledge, geography, science basics, pop culture, music, sports, food, acronyms, Nigeria culture, riddles, number games. Keep it fun and accessible.
+  const prompt = `Category label: "${topic}". ${categoryInstructions}${uniquenessBlock}
 
-CRITICAL - Question scope: Questions MUST be about general world knowledge only. Do NOT ask about the game itself, game currency, or anything app-specific.
+CRITICAL - Question scope: Questions MUST be about general world knowledge only (or pure math). Do NOT ask about the game itself, game currency, or anything app-specific.
 
 Requirements:
-- One clear, unambiguous question (full sentence). No multi-part questions.
-- The ANSWER must be SHORT: one or two words only (e.g. "Burna Boy", "Abuja", "50").
-- For multiple choice you MUST provide exactly 4 options. The "answer" field MUST be exactly one of those four options—the correct one. Do not put a wrong option as the answer (e.g. for "capital of France" the answer must be "Paris", not "Madrid" or "Rome").
-- Make it engaging—something that makes players think then react when they get it right.
-- Self-check before finalizing: verify the correct answer is factual, belongs to options, and for math compute the result directly (not by pattern matching).
+- For multiple choice you MUST provide exactly 4 options. The "answer" field MUST be exactly one of those four options—the correct one.
+- For math, numeric answers can be one token (e.g. "48" or "9/10").
+- For General Knowledge, the answer must be 1–3 short words (e.g. "Paris", "Pacific Ocean").
+- Self-check: for math, compute the result; for flag/logo, verify the image URL matches the answer.
 
 Format your response as JSON:
 {
-  "question": "the question text",
-  "answer": "must be exactly one of the four options below, 1-2 words",
+  "question": "full question text including Flag: or Logo: line on its own line when required",
+  "answer": "must be exactly one of the four options",
   "options": ["option1", "option2", "option3", "option4"]
 }`;
+
+  const systemSystem =
+    kind === "math"
+      ? "You are a math quiz generator. Respond with valid JSON only. The answer must match one of the four options."
+      : kind === "guess_the_flag" || kind === "guess_the_logo"
+        ? "You are a visual quiz generator. Always include the required Flag: or Logo: URL line exactly as specified. Respond with valid JSON only."
+        : "You are a general-knowledge quiz generator. Respond with valid JSON only. The answer must match one of the four options.";
 
   try {
     const MAX_VERIFICATION_RETRIES = 3;
@@ -191,8 +206,7 @@ Format your response as JSON:
         messages: [
           {
             role: "system",
-            content:
-              "You are a street-quiz question generator. Generate one clear, punchy question per response. The question MUST match the given category exactly (e.g. Simple math = varied basic math: arithmetic, algebra, percentages, fractions, simple patterns; Viral & internet trends = Nigeria-focused online culture). The 'answer' field must be 1-2 words only and MUST be exactly one of the four options you provide—never a wrong option. Do NOT repeat the same fact in different words. Always respond with valid JSON only.",
+            content: systemSystem,
           },
           { role: "user", content: prompt },
         ],
@@ -211,6 +225,13 @@ Format your response as JSON:
 
       const candidate: GeneratedQuestion = { question, answer, options };
       if (!candidate.question || !candidate.answer || !candidate.options || candidate.options.length !== 4) {
+        continue;
+      }
+
+      if (kind === "guess_the_flag" && !/flag:\s*https:\/\/flagcdn\.com\//i.test(question)) {
+        continue;
+      }
+      if (kind === "guess_the_logo" && !/logo:\s*https:\/\/logo\.clearbit\.com\//i.test(question)) {
         continue;
       }
 

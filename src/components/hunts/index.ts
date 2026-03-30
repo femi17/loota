@@ -1,3 +1,4 @@
+export { QuizPromptDisplay } from "./QuizPromptDisplay";
 export { HuntsNavButtons } from "./HuntsNavButtons";
 export { HuntsToast } from "./HuntsToast";
 export { HuntsTravelHud } from "./HuntsTravelHud";

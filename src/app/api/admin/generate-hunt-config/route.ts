@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { requireAdmin } from "@/lib/server-auth";
 import { logger } from "@/lib/logger";
 import { getLgasForState } from "@/lib/nigeria-lgas";
+import { buildRotatedQuestionCategories } from "@/lib/hunt-quiz-categories";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
@@ -23,14 +24,51 @@ const NIGERIAN_STATES_AND_FCT = [
 /** Nigeria bounds for validation. Mapbox returns center as [longitude, latitude]. */
 const NIGERIA_BBOX = { minLng: 2.69, minLat: 4.27, maxLng: 14.68, maxLat: 13.9 };
 
-/** Pick n random LGAs from the list (with replacement if n > list length). */
-function pickRandomLgas(lgas: string[], n: number): string[] {
-  if (lgas.length === 0) return [];
-  const result: string[] = [];
-  for (let i = 0; i < n; i++) {
-    result.push(lgas[Math.floor(Math.random() * lgas.length)]!);
+/**
+ * Pick n LGAs without repeating until every LGA has been used once (then cycle in order).
+ * When `first` is set and exists in the list, it is always waypoint 0 (home LGA).
+ */
+function pickDistinctLgas(lgas: string[], n: number, first: string | null | undefined): string[] {
+  if (lgas.length === 0 || n <= 0) return [];
+  const uniq = [...new Set(lgas)];
+  for (let i = uniq.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [uniq[i], uniq[j]] = [uniq[j], uniq[i]];
   }
-  return result;
+  if (first && uniq.includes(first)) {
+    uniq.splice(uniq.indexOf(first), 1);
+    uniq.unshift(first);
+  }
+  if (n <= uniq.length) {
+    return uniq.slice(0, n);
+  }
+  const out: string[] = [];
+  let idx = 0;
+  while (out.length < n) {
+    out.push(uniq[idx % uniq.length]!);
+    idx++;
+  }
+  return out;
+}
+
+/** Human waypoint label: place + LGA + state so players see where they are. */
+function buildWaypointLabel(
+  result: MapboxGeocodeResult,
+  expectedLga: string | null,
+  singleState: string | null,
+): string {
+  const rawName = (result.place_name || "").trim();
+  const placeFirst =
+    (result.placeText && result.placeText.trim()) ||
+    (rawName.includes(",") ? rawName.split(",")[0]!.trim() : rawName) ||
+    "Checkpoint";
+  if (singleState && expectedLga) {
+    return `${placeFirst} · ${expectedLga}, ${singleState}`;
+  }
+  if (singleState) {
+    return `${placeFirst} · ${singleState}`;
+  }
+  return rawName || placeFirst;
 }
 
 function isInNigeria(lng: number, lat: number): boolean {
@@ -169,10 +207,12 @@ ${lgas.map((lga, i) => `${i + 1}. ${lga}`).join("\n")}
 
 Rules:
 - Return exactly ${lgas.length} place queries, same order as the LGAs.
-- Each query must be a precise place INSIDE the given LGA, not just the LGA name.
-- Prefer real places people can recognize and Mapbox can geocode: markets, bus parks, junctions, streets, neighborhoods, stadiums, schools, malls, hospitals, popular spots.
-- Avoid generic-only labels like "Mushin, Lagos, Nigeria" with no specific place.
-- Format each as: "Place, LGA, ${state}, Nigeria"
+- Each query must name a precise place INSIDE that row's LGA (not another LGA).
+- Each query MUST include the LGA name in the string (middle segment), e.g. "Oshodi Bus Terminal, Oshodi-Isolo, ${state}, Nigeria".
+- Use DIFFERENT venue types across rows (market, stadium, hospital, junction, mall, school, park, bus stop) — do not repeat the same venue name twice.
+- Prefer real places Mapbox can geocode in Nigeria.
+- Avoid vague names like only "Market, Lagos, Nigeria" without LGA context.
+- Format each as: "Place name, LGA name, ${state}, Nigeria"
 - Keep each query short and geocoding-friendly.
 
 Return JSON only:
@@ -192,7 +232,7 @@ Return JSON only:
         { role: "user", content: prompt },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.8,
+      temperature: 0.95,
     });
     const content = completion.choices[0]?.message?.content;
     if (!content) return null;
@@ -257,14 +297,7 @@ Target Spend Per User drives everything. From it, determine in this order:
 
 2. Number of keys to win: MUST equal numberOfHunts (one key per location). We will set keysToWin = numberOfHunts.
 
-3. Question categories: Return exactly numberOfHunts categories—one per location. Categories MUST be chosen from this list:
-   - Simple math
-   - General knowledge
-   - Guess the flag
-   Rules:
-   - Do not use riddles.
-   - Use a wide spread: avoid repeating the same category twice in a row when possible.
-   - "Guess the flag" should appear sometimes, not at every step.
+3. Question categories: OMIT from your JSON. The server assigns exactly four categories in rotation for every hunt: Math, General Knowledge, Guess the logo, Guess the flag (repeating across locations in that order).
 
 4. Where the hunt takes place (locations drive spending: travel, rent, bus, plane, refuel, rest):
    - Host chose: ${singleState ? `Single state = "${singleState}". Locations will be chosen automatically from random Local Government Areas (LGAs) within ${singleState}. Return regionName as "${singleState}". Do NOT return startLocationQuery or waypointQueries—we will assign LGA-based locations server-side.` : "Nationwide. You may spread waypoints across different states. Pick a start state and location, then distribute waypoints across states. Return regionName as \"Nigeria\" or \"Nationwide\". Return startLocationQuery and waypointQueries: array of exactly numberOfHunts strings, each in \"Place, State, Nigeria\" format."}
@@ -310,7 +343,6 @@ Return your response as JSON:
     "busFare": number,
     "planeFare": number
   },
-  "questionCategories": ["category1", "category2", ...],
   "difficultyDistribution": {
     "easy": number,
     "medium": number,
@@ -343,13 +375,7 @@ Return your response as JSON:
     const n = Math.max(1, Number(config.numberOfHunts) || 1);
     config.numberOfHunts = n;
     config.keysToWin = n;
-    const categories = Array.isArray(config.questionCategories) ? config.questionCategories : [];
-    if (categories.length !== n) {
-      config.questionCategories =
-        categories.length >= n
-          ? categories.slice(0, n)
-          : [...categories, ...Array.from({ length: n - categories.length }, (_, i) => categories[i % categories.length] ?? "General knowledge")];
-    }
+    config.questionCategories = buildRotatedQuestionCategories(n);
 
     // When single state: pick LGAs (use huntLga for first if provided), then one location per LGA
     const chosenLga = typeof huntLga === "string" && huntLga.trim() ? huntLga.trim() : null;
@@ -365,12 +391,7 @@ Return your response as JSON:
     if (singleState && n > 0) {
       const lgas = getLgasForState(singleState);
       if (lgas.length > 0) {
-        let selectedLgas: string[];
-        if (chosenLga && lgas.includes(chosenLga)) {
-          selectedLgas = [chosenLga, ...pickRandomLgas(lgas.filter((l) => l !== chosenLga), n - 1)];
-        } else {
-          selectedLgas = pickRandomLgas(lgas, n);
-        }
+        const selectedLgas: string[] = pickDistinctLgas(lgas, n, chosenLga && lgas.includes(chosenLga) ? chosenLga : null);
         selectedLgasForWaypoints = selectedLgas;
         // Ask OpenAI for specific places inside each selected LGA (not just LGA centroids).
         const specificQueries = await generateLgaSpecificPlaceQueries(singleState, selectedLgas);
@@ -406,8 +427,14 @@ Return your response as JSON:
           const primary = waypointQueries[i];
           if (primary) queriesToTry.push(primary);
           const others = lgas.filter((lga) => `${lga}, ${singleState}, Nigeria` !== primary);
-          const altLgas = pickRandomLgas(others, Math.min(MAX_RETRIES - 1, others.length));
-          altLgas.forEach((lga) => queriesToTry.push(`${lga}, ${singleState}, Nigeria`));
+          const shuffledOthers = [...others];
+          for (let si = shuffledOthers.length - 1; si > 0; si--) {
+            const j = Math.floor(Math.random() * (si + 1));
+            [shuffledOthers[si], shuffledOthers[j]] = [shuffledOthers[j]!, shuffledOthers[si]!];
+          }
+          shuffledOthers.slice(0, Math.min(MAX_RETRIES - 1, shuffledOthers.length)).forEach((lga) => {
+            queriesToTry.push(`${lga}, ${singleState}, Nigeria`);
+          });
         } else {
           queriesToTry.push(`${singleState}, Nigeria`);
         }
@@ -438,7 +465,7 @@ Return your response as JSON:
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           waypoints.push({
-            label: result.place_name,
+            label: buildWaypointLabel(result, expectedLga, singleState),
             lng: result.lng,
             lat: result.lat,
           });
@@ -452,7 +479,7 @@ Return your response as JSON:
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
             waypoints.push({
-              label: fallback.place_name || config.regionName || "Checkpoint",
+              label: buildWaypointLabel(fallback, expectedLga, singleState),
               lng: fallback.lng,
               lat: fallback.lat,
             });
@@ -465,7 +492,10 @@ Return your response as JSON:
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
             waypoints.push({
-              label: config.regionName || "Checkpoint",
+              label:
+                expectedLga && singleState
+                  ? `Checkpoint · ${expectedLga}, ${singleState}`
+                  : config.regionName || "Checkpoint",
               lng: jitterLng,
               lat: jitterLat,
             });

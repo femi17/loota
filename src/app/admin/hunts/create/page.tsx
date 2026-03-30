@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { supabase } from "@/lib/supabase/client";
 import { getLgasForState } from "@/lib/nigeria-lgas";
+import { HUNT_QUESTION_CATEGORIES } from "@/lib/hunt-quiz-categories";
 import Link from "next/link";
 
 type HuntConfig = {
@@ -565,6 +566,17 @@ export default function CreateHuntPage() {
                 AI Configuration
               </h2>
 
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/90">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-600 mb-2">
+                  Quiz categories (fixed)
+                </p>
+                <p className="text-sm text-slate-700 leading-relaxed">
+                  Each checkpoint uses one of these four types, in order, then repeats:{" "}
+                  <span className="font-bold">{HUNT_QUESTION_CATEGORIES.join(" → ")}</span>.
+                  “Guess the logo” and “Guess the flag” show an image in the app (Clearbit + FlagCDN URLs in the AI question).
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={handleGenerate}
@@ -592,7 +604,7 @@ export default function CreateHuntPage() {
               {generating && (
                 <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl">
                   <p className="text-sm text-blue-800">
-                    AI is calculating pricing, determining number of hunts, generating questions, and creating briefing...
+                    AI is calculating pricing, determining number of locations, waypoint areas, and briefing…
                   </p>
                 </div>
               )}
@@ -686,7 +698,7 @@ export default function CreateHuntPage() {
                     Quiz brain
                   </p>
                   <p className="text-sm text-amber-900">
-                    Questions are not pre-generated. When a player reaches each location, AI will pick from the categories above and generate a fresh question (and grade their answer). So each player can get different questions and the quiz stays dynamic.
+                    Questions are not pre-generated. When a player reaches each location, AI uses the category for that step (rotating the four types above) and generates a fresh question. Logo and flag rounds include an image line in the question text so players see the picture.
                   </p>
                 </div>
               </div>

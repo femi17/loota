@@ -15,6 +15,7 @@ import {
 } from "@/lib/region-map-view";
 import { addMapboxTrafficLayer } from "@/lib/mapbox-traffic-layer";
 import { isHuntPastEndDate } from "@/lib/hunt-schedule";
+import { QuizPromptDisplay } from "@/components/hunts/QuizPromptDisplay";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 type LngLat = { lng: number; lat: number };
@@ -3631,7 +3632,9 @@ export default function BroadcastPage() {
               <div className="rounded-2xl border-2 border-amber-400/90 bg-[#0f172a]/95 px-5 py-4 shadow-2xl backdrop-blur-md">
                 <p className="text-[10px] font-black uppercase tracking-[0.35em] text-amber-300">On air · Quiz</p>
                 <p className="mt-1 text-xs font-bold text-white/80">{fp.name}&apos;s question</p>
-                <p className="mt-3 text-sm md:text-base font-semibold leading-snug text-white">{fp.currentQuestionText}</p>
+                <div className="mt-3 text-sm md:text-base leading-snug">
+                  <QuizPromptDisplay prompt={fp.currentQuestionText} variant="light" />
+                </div>
                 <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
                   <span className="text-[10px] font-black uppercase tracking-widest text-white/50">Time left</span>
                   <span className="text-2xl md:text-3xl font-black tabular-nums text-amber-300 drop-shadow-lg">

@@ -7,6 +7,7 @@ import { TASK_CATEGORY_LABEL, TASK_TIME_SECONDS } from "@/app/hunts/constants";
 /** Delay (ms) to show "Oh no" failure message before rerouting. */
 const QUIZ_FAIL_REROUTE_DELAY_MS = 2500;
 import { taskCategoryForStep, normAnswer } from "@/app/hunts/utils";
+import { QuizPromptDisplay } from "@/components/hunts/QuizPromptDisplay";
 
 type TravelMode = { id: string; label: string; icon: string };
 type DemoUnlockTask = {
@@ -116,7 +117,7 @@ function NextQuizAtLocation({
       ) : question ? (
         <>
           <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">{catLabel}</p>
-          <p className="mt-1 text-sm text-slate-700 leading-relaxed">{question.prompt}</p>
+          <QuizPromptDisplay prompt={question.prompt} className="mt-1" />
         </>
       ) : null}
       <button
@@ -589,9 +590,9 @@ export function HuntsStatusDrawerContent({
                   onContextMenu={(e) => e.preventDefault()}
                   onDragStart={(e) => e.preventDefault()}
                 >
-                  <p className="text-sm font-extrabold text-[#0F172A]">
-                    {locationQuizQuestion?.prompt || "Solve the task…"}
-                  </p>
+                  <QuizPromptDisplay
+                    prompt={locationQuizQuestion?.prompt || "Solve the task…"}
+                  />
                 </div>
                 <p className="mt-2 text-sm text-slate-600">
                   Answer correctly to get the key for this location.
@@ -860,9 +861,7 @@ export function HuntsStatusDrawerContent({
                         onContextMenu={(e) => e.preventDefault()}
                         onDragStart={(e) => e.preventDefault()}
                       >
-                        <p className="text-sm font-extrabold text-[#0F172A]">
-                          {q?.prompt || "Solve the task…"}
-                        </p>
+                        <QuizPromptDisplay prompt={q?.prompt || "Solve the task…"} />
                       </div>
                       <p className="mt-2 text-sm text-slate-600">
                         Answer correctly to get the next location (private).
@@ -1215,9 +1214,7 @@ export function HuntsStatusDrawerContent({
                         onContextMenu={(e) => e.preventDefault()}
                         onDragStart={(e) => e.preventDefault()}
                       >
-                        <p className="text-sm font-extrabold text-[#0F172A]">
-                          {q?.prompt || "Solve the task…"}
-                        </p>
+                        <QuizPromptDisplay prompt={q?.prompt || "Solve the task…"} />
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
