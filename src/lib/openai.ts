@@ -27,6 +27,20 @@ function classifyQuizCategory(topic: string): QuizKind {
   return "general_knowledge";
 }
 
+function isTriviallySimpleMathQuestion(question: string): boolean {
+  const q = question.trim();
+  // Reject ultra-basic one-step arithmetic like "12 / 4" or "5 + 7" (too easy / repetitive).
+  // Allow equations, parentheses, powers, multi-step, fractions, or short algebra.
+  const singleOp = /^\s*(?:compute:|solve:)?\s*\d{1,3}\s*([+\-*/])\s*\d{1,3}\s*(?:=\s*\?)?\s*$/i;
+  if (singleOp.test(q)) return true;
+  // Reject percent-only questions to avoid over-serving % rounds.
+  const hasPercent = /%|percent/i.test(q);
+  const hasVariable = /\b[xya]\b/i.test(q);
+  const hasMultiStep = /[()^]|(?:\d+\s*[+\-*/]\s*\d+\s*[+\-*/])/.test(q);
+  if (hasPercent && !hasVariable && !hasMultiStep) return true;
+  return false;
+}
+
 type GeneratedQuestion = { question: string; answer: string; options?: string[] };
 
 function normalizeText(value: string): string {
@@ -151,8 +165,14 @@ Uniqueness: Generate a fresh, original question. Vary the specific sub-topic (e.
   const categoryInstructions =
     kind === "math"
       ? `Category: Math (mental math only).
-- Ask ONE clear ${difficultyPrompt} math problem: arithmetic, percentages, fractions, simple patterns, or very simple algebra.
+- Ask ONE clear ${difficultyPrompt} *tricky-but-solvable* math problem. Rotate across:
+  - quick algebra (solve for x, simplify an expression)
+  - 2-step arithmetic (mix operations, order of operations)
+  - fractions/ratios, percentages (NOT every time)
+  - short number patterns
+- Avoid ultra-basic one-step questions (e.g. "12 / 4") and avoid percent-only questions repeatedly.
 - No calculators needed; answer must be a short number or fraction (e.g. "47", "3/4", "40").
+- Prefer questions that require at least 2 mental steps OR solving a small equation.
 - "question" field must be ONLY the math problem text (no image lines).`
       : kind === "general_knowledge"
         ? `Category: General Knowledge.
@@ -232,6 +252,9 @@ Format your response as JSON:
         continue;
       }
       if (kind === "guess_the_logo" && !/logo:\s*https:\/\/logo\.clearbit\.com\//i.test(question)) {
+        continue;
+      }
+      if (kind === "math" && isTriviallySimpleMathQuestion(question)) {
         continue;
       }
 
