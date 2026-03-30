@@ -11,8 +11,11 @@ export function parseQuizPromptMedia(raw: string): { text: string; media: QuizPr
   const lines = raw.split(/\r?\n/);
   const kept: string[] = [];
   for (const line of lines) {
-    const flagM = /^\s*Flag:\s*(https?:\/\/\S+)/i.exec(line);
-    const logoM = /^\s*Logo:\s*(https?:\/\/\S+)/i.exec(line);
+    // Accept a few variants from OpenAI or formatting:
+    // "Flag: <url>", "Flag - <url>", "Flag URL: <url>"
+    const flagM = /^\s*Flag(?:\s*URL)?\s*[:\-]\s*(https?:\/\/\S+)/i.exec(line);
+    // "Logo: <url>", "Logo - <url>", "Logo URL: <url>"
+    const logoM = /^\s*Logo(?:\s*URL)?\s*[:\-]\s*(https?:\/\/\S+)/i.exec(line);
     if (flagM?.[1]) {
       media.push({ kind: "flag", url: flagM[1] });
       continue;

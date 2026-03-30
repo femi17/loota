@@ -238,20 +238,37 @@ Format your response as JSON:
       if (!content) continue;
 
       const parsed = JSON.parse(content);
-      const question = (parsed.question ?? "").toString().trim();
+      let question = (parsed.question ?? "").toString().trim();
       const options = normalizeOptions(parsed.options);
       let answer = (parsed.answer ?? "").toString().trim();
       answer = alignAnswerToOptions(answer, options);
+
+      // Guardrail: ensure media rounds include a human-readable prompt line, even if the model forgets it.
+      if (kind === "guess_the_flag") {
+        if (/^\s*Flag\s*[:\-]\s*https?:\/\/\S+\s*$/i.test(question)) {
+          question = `${question}\nWhich country is this flag?`;
+        }
+      }
+      if (kind === "guess_the_logo") {
+        // Improve reliability by requesting a sized raster format when no querystring is provided.
+        question = question.replace(
+          /^\s*Logo\s*[:\-]\s*(https:\/\/logo\.clearbit\.com\/[^\s?]+)\s*$/gim,
+          (_m: string, url: string) => `Logo: ${url}?size=256&format=png`
+        );
+        if (/^\s*Logo\s*[:\-]\s*https?:\/\/\S+\s*$/i.test(question)) {
+          question = `${question}\nWhich brand's logo is this?`;
+        }
+      }
 
       const candidate: GeneratedQuestion = { question, answer, options };
       if (!candidate.question || !candidate.answer || !candidate.options || candidate.options.length !== 4) {
         continue;
       }
 
-      if (kind === "guess_the_flag" && !/flag:\s*https:\/\/flagcdn\.com\//i.test(question)) {
+      if (kind === "guess_the_flag" && !/flag(?:\s*url)?\s*[:\-]\s*https:\/\/flagcdn\.com\//i.test(question)) {
         continue;
       }
-      if (kind === "guess_the_logo" && !/logo:\s*https:\/\/logo\.clearbit\.com\//i.test(question)) {
+      if (kind === "guess_the_logo" && !/logo(?:\s*url)?\s*[:\-]\s*https:\/\/logo\.clearbit\.com\//i.test(question)) {
         continue;
       }
       if (kind === "math" && isTriviallySimpleMathQuestion(question)) {
