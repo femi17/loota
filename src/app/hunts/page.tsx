@@ -1324,8 +1324,42 @@ export default function HuntsPage() {
       const country = await resolveCountryName(cand);
       if (!country) continue;
       if (!country.toLowerCase().includes("nigeria")) continue;
+      // Apply locally immediately so UI stops thinking we're still at the locked waypoint.
       setPlayerPos(cand);
       setToast({ title: "Anti-cheat", message: why });
+      // Persist to DB so Realtime / stale rows don't snap the avatar back to the waypoint (causes flicker/back-and-forth).
+      if (activeHuntId && user?.id && supabase) {
+        lastArrivalAtRef.current = Date.now();
+        skipNextAtWaypointEffectRef.current = true;
+        const playerName = (profile?.username as string) || "Player";
+        refreshHuntsMapCameraSnapshot(mapRef.current, mapContainerRef.current);
+        supabase
+          .from("player_positions")
+          .upsert(
+            {
+              hunt_id: activeHuntId,
+              player_id: user.id,
+              player_name: playerName,
+              lng: cand.lng,
+              lat: cand.lat,
+              keys,
+              travel_mode: travelModeId,
+              travel_started_at: null,
+              travel_route_coords: null,
+              travel_duration_ms: null,
+              answering_question: false,
+              current_question: null,
+              question_deadline_at: null,
+              active_client_id: getClientId(),
+              last_active_at: new Date().toISOString(),
+              ...getHuntsMapCameraDbFields(),
+            },
+            { onConflict: "hunt_id,player_id" }
+          )
+          .then(({ error }: { error: unknown }) => {
+            if (error) console.warn("[Hunts] anti-cheat relocate upsert error", error);
+          });
+      }
       return;
     }
     setToast({ title: "Anti-cheat", message: why });
