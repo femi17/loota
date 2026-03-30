@@ -1671,15 +1671,102 @@ export default function HuntsPage() {
     failLocationQuizRef.current = failLocationQuiz;
   });
 
-  // Demo ownership (wire to Supabase/inventory later)
-  // Walk is always available; other modes are earned/bought.
-  const [ownedModes, setOwnedModes] = useState<Set<TravelModeId>>(
+  // Vehicle ownership: persistent via `player_inventory` for paid hunts; temporary per hunt for free hunts.
+  const huntPaystackMode: "free" | "paid" =
+    (activeHunt as any)?.pricing_config?.paystackMode === "paid" ? "paid" : "free";
+
+  const FREE_HUNT_INVENTORY_KEY = useMemo(
+    () => (activeHuntId ? `loota_free_inventory:${activeHuntId}` : null),
+    [activeHuntId],
+  );
+
+  const [persistentOwnedModes, setPersistentOwnedModes] = useState<Set<TravelModeId>>(
     () => new Set<TravelModeId>(["walk"]),
   );
+  const [freeOwnedModes, setFreeOwnedModes] = useState<Set<TravelModeId>>(
+    () => new Set<TravelModeId>(["walk"]),
+  );
+
+  const ownedModes = useMemo(() => {
+    const out = new Set<TravelModeId>(["walk"]);
+    for (const m of persistentOwnedModes) out.add(m);
+    // Free hunt adds temporary ownership (only within this hunt)
+    for (const m of freeOwnedModes) out.add(m);
+    return out;
+  }, [persistentOwnedModes, freeOwnedModes]);
+
   const ownedModesRef = useRef(ownedModes);
   useEffect(() => {
     ownedModesRef.current = ownedModes;
   }, [ownedModes]);
+
+  // Load persistent inventory from DB (paid purchases / permanent ownership).
+  const loadPersistentOwnedModes = useCallback(async () => {
+    if (!user?.id || !supabase) {
+      setPersistentOwnedModes(new Set<TravelModeId>(["walk"]));
+      return;
+    }
+    const { data, error } = await supabase
+      .from("player_inventory")
+      .select("item_type, item_id, owned")
+      .eq("player_id", user.id)
+      .eq("item_type", "travel_mode");
+    if (error) {
+      setPersistentOwnedModes(new Set<TravelModeId>(["walk"]));
+      return;
+    }
+    const set = new Set<TravelModeId>(["walk"]);
+    for (const row of (data as Array<{ item_id?: string; owned?: boolean }> | null) ?? []) {
+      if (row?.owned === false) continue;
+      const id = String(row?.item_id ?? "").trim();
+      if (id === "bus_pass") set.add("bus");
+      else if (id === "air_taxi") set.add("plane");
+      else if (id === "bicycle" || id === "motorbike" || id === "car") set.add(id);
+    }
+    setPersistentOwnedModes(set);
+  }, [user?.id]);
+
+  useEffect(() => {
+    void loadPersistentOwnedModes();
+  }, [loadPersistentOwnedModes]);
+
+  // Load free-hunt inventory (temporary, per hunt) from localStorage.
+  useEffect(() => {
+    if (!FREE_HUNT_INVENTORY_KEY || typeof window === "undefined") {
+      setFreeOwnedModes(new Set<TravelModeId>(["walk"]));
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(FREE_HUNT_INVENTORY_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+      const set = new Set<TravelModeId>(["walk"]);
+      if (Array.isArray(parsed)) {
+        for (const x of parsed) {
+          const id = String(x ?? "").trim();
+          if (id === "bicycle" || id === "motorbike" || id === "car") set.add(id);
+        }
+      }
+      setFreeOwnedModes(set);
+    } catch {
+      setFreeOwnedModes(new Set<TravelModeId>(["walk"]));
+    }
+  }, [FREE_HUNT_INVENTORY_KEY]);
+
+  // When a free hunt ends, clear temporary inventory for that hunt.
+  useEffect(() => {
+    if (!huntHasEnded) return;
+    if (huntPaystackMode !== "free") return;
+    if (!FREE_HUNT_INVENTORY_KEY || typeof window === "undefined") {
+      setFreeOwnedModes(new Set<TravelModeId>(["walk"]));
+      return;
+    }
+    try {
+      window.localStorage.removeItem(FREE_HUNT_INVENTORY_KEY);
+    } catch {
+      // ignore
+    }
+    setFreeOwnedModes(new Set<TravelModeId>(["walk"]));
+  }, [huntHasEnded, huntPaystackMode, FREE_HUNT_INVENTORY_KEY]);
 
   // Auto-finish maintenance/repairs
   useEffect(() => {
@@ -1921,17 +2008,50 @@ export default function HuntsPage() {
     setShopError(null);
     if (!item.canOwn) return;
     if (ownedModes.has(item.id)) return;
-    if (credits < item.buyCost) {
-      setShopError("Not enough coins. Buy coins to continue.");
-      return;
+    // Paid hunts: purchase is permanent (player_inventory) via atomic API.
+    // Free hunts: purchase is temporary for this hunt only (localStorage), cleared at hunt end.
+    if (huntPaystackMode === "paid") {
+      try {
+        const res = await fetch("/api/inventory/purchase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_id: item.id }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { newCredits?: number; error?: string };
+        if (!res.ok) {
+          setShopError(data?.error ?? "Purchase failed.");
+          return;
+        }
+        if (typeof data?.newCredits === "number") {
+          setCredits(Number(data.newCredits));
+          updateCredits?.(Number(data.newCredits));
+        }
+        await refreshProfile?.();
+        await loadPersistentOwnedModes();
+      } catch {
+        setShopError("Purchase failed.");
+        return;
+      }
+    } else {
+      if (credits < item.buyCost) {
+        setShopError("Not enough coins. Buy coins to continue.");
+        return;
+      }
+      const newBal = await deductCredits(item.buyCost);
+      if (newBal === null) return;
+      setFreeOwnedModes((prev) => {
+        const next = new Set(prev);
+        next.add(item.id);
+        try {
+          if (FREE_HUNT_INVENTORY_KEY && typeof window !== "undefined") {
+            window.localStorage.setItem(FREE_HUNT_INVENTORY_KEY, JSON.stringify(Array.from(next)));
+          }
+        } catch {
+          // ignore storage
+        }
+        return next;
+      });
     }
-    const newBal = await deductCredits(item.buyCost);
-    if (newBal === null) return;
-    setOwnedModes((prev) => {
-      const next = new Set(prev);
-      next.add(item.id);
-      return next;
-    });
     if (item.id === "bicycle" || item.id === "motorbike" || item.id === "car") {
       const id = item.id as VehicleId;
       setVehicleState((prev: any) => ({

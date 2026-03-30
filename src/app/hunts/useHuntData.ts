@@ -9,6 +9,7 @@ export type ActiveHuntRow = {
   keys_to_win: number;
   start_date: string;
   end_date?: string | null;
+  pricing_config?: { paystackMode?: "free" | "paid" } | null;
   region_name: string | null;
   waypoints: Array<{ label: string; lng: number; lat: number }> | null;
   questions: Array<{
@@ -60,7 +61,7 @@ export function useHuntData(userId: string | undefined): UseHuntDataResult {
     supabase
       .from("hunts")
       .select(
-        "id, keys_to_win, start_date, end_date, region_name, waypoints, questions, question_categories"
+        "id, keys_to_win, start_date, end_date, pricing_config, region_name, waypoints, questions, question_categories"
       )
       .eq("status", "active")
       .order("start_date", { ascending: true })
