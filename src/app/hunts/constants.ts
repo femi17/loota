@@ -66,7 +66,7 @@ export const TASK_BANK: Record<TaskCategoryId, TaskItem[]> = {
 
 export const WALK_REJUVENATE_EVERY_KM = 4;
 export const BIKE_REJUVENATE_EVERY_KM = 8;
-export const MOTO_REFUEL_EVERY_KM = 10;
+export const MOTO_REFUEL_EVERY_KM = 8;
 export const CAR_REFUEL_EVERY_KM = 10;
 export const DRIVE_REST_EVERY_KM = 250;
 export const BUS_STOP_EVERY_KM = 12;
