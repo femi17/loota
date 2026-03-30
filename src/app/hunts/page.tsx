@@ -157,7 +157,7 @@ export default function HuntsPage() {
     drawer, setDrawer, resumeDrawerRef, navNotifications, setNavNotifications, shopError, setShopError, payError, setPayError,
     paystackLoading, setPaystackLoading, huntLeaderboard, setHuntLeaderboard, leaderboardLoading, setLeaderboardLoading,
     initialCreditsRef, activeHunt, setActiveHunt, activeHuntId, setActiveHuntId, isRegisteredForHunt, secondsUntilStart,
-    huntFetchDone, huntHasStarted, huntHasEnded, canPlayHunt, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
+    secondsUntilEnd, huntFetchDone, huntHasStarted, huntHasEnded, canPlayHunt, deductCredits, keys, setKeys, keysToWin, huntPhase, setHuntPhase, travelModeId, setTravelModeId,
     playerPositionsHydrated,
     travelMode, travelPickModeId, setTravelPickModeId, startLocation, publicLocation, publicLocationLabel, currentWaypoint,
     playerPos, setPlayerPos, userCountry, setUserCountry, locationIsApproximate, setLocationIsApproximate, destination, setDestination,
@@ -6317,6 +6317,26 @@ export default function HuntsPage() {
               show={Boolean(isRegisteredForHunt && !huntHasStarted && secondsUntilStart != null)}
               secondsUntilStart={secondsUntilStart ?? 0}
             />
+            {canPlayHunt && secondsUntilEnd != null ? (
+              <div className="pointer-events-none absolute left-1/2 top-3 z-30 w-[min(100%,280px)] -translate-x-1/2 px-2 sm:top-4 sm:w-auto">
+                <div className="rounded-2xl border border-amber-400/60 bg-slate-950/90 backdrop-blur-md px-3 py-2 sm:px-4 sm:py-2.5 text-center shadow-lg ring-1 ring-amber-500/20">
+                  <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                    Hunt ends in
+                  </p>
+                  <p className="mt-0.5 text-lg sm:text-2xl font-black tabular-nums tracking-tight text-white">
+                    {(() => {
+                      const sec = Math.max(0, Math.floor(secondsUntilEnd));
+                      const h = Math.floor(sec / 3600);
+                      const m = Math.floor((sec % 3600) / 60);
+                      const s = sec % 60;
+                      return h > 0
+                        ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+                        : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+                    })()}
+                  </p>
+                </div>
+              </div>
+            ) : null}
             <HuntsHuntEndedOverlay show={Boolean(isRegisteredForHunt && huntHasEnded)} />
           </div>,
           document.body
