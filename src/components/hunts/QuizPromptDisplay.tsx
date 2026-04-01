@@ -1,6 +1,7 @@
 "use client";
 
 import { parseQuizPromptMedia } from "@/lib/quiz-prompt-media";
+import { normalizeLogoUrlForDisplay } from "@/lib/quiz-logo-url";
 
 type Props = {
   prompt: string;
@@ -29,7 +30,7 @@ export function QuizPromptDisplay({ prompt, className = "", variant = "dark" }: 
           {media.map((m, i) => (
             <img
               key={`${m.kind}-${i}`}
-              src={m.url}
+              src={m.kind === "logo" ? normalizeLogoUrlForDisplay(m.url) : m.url}
               alt=""
               className={m.kind === "flag" ? imgFlag : imgLogo}
               loading="lazy"

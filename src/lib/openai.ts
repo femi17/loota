@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "@/lib/logger";
+import { rewriteLogoUrlsInQuestionText } from "@/lib/quiz-logo-url";
 
 export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
@@ -12,7 +13,7 @@ export const openai = new OpenAI({
 export const STREET_QUIZ_CATEGORY_HINTS = [
   "Math — basic arithmetic, percentages, fractions, simple patterns (mental math)",
   "General Knowledge — world facts, geography, science, culture, history (no app/game trivia)",
-  "Guess the logo — Clearbit logo URL + which brand",
+  "Guess the logo — Google favicon URL (by domain) + which brand",
   "Guess the flag — FlagCDN flag URL + which country",
 ] as const;
 
@@ -89,7 +90,7 @@ Validation rules:
 - Reject if the question is ambiguous, has multiple plausible correct answers, or is misleading.
 - For math questions, compute the result; do not infer by option patterns.
 - For "Guess the flag" / FlagCDN questions: the question text MUST contain a line "Flag: https://flagcdn.com/..." and the answer must match that flag's country.
-- For "Guess the logo" / Clearbit questions: the question text MUST contain a line "Logo: https://logo.clearbit.com/..." and the answer must match that brand.
+- For "Guess the logo" questions: the question text MUST contain a line "Logo: https://www.google.com/s2/favicons?domain=..." and the answer must match that brand's domain.
 - For person/country identity facts (e.g. nationality), verify against real-world facts.
 - First derive the answer independently from world knowledge or calculation, then compare to the marked answer.
 - If uncertain, set valid=false and confidence="low".
@@ -188,11 +189,11 @@ Uniqueness: Generate a fresh, original question. Vary the specific sub-topic (e.
 - Options: exactly 4 real country names; "answer" must be the exact country name for that flag and must match one option.`
           : `Category: Guess the logo.
 - Put the FIRST line of "question" EXACTLY as:
-  Logo: https://logo.clearbit.com/{domain}
-  where {domain} is a well-known global brand's website domain (e.g. nike.com, apple.com, spotify.com, mcdonalds.com). Use a diverse, recognizable brand.
+  Logo: https://www.google.com/s2/favicons?domain={domain}&sz=128
+  where {domain} is a well-known brand's site domain WITHOUT https (e.g. nike.com, apple.com, starbucks.com). Google serves a stable favicon image for that domain.
 - Then on the next line: "Which brand's logo is this?" (or equivalent).
 - Options: exactly 4 distinct brand/company names; "answer" must be the brand that owns that domain and must match one option exactly.
-- Do NOT use placeholder domains; use real logos served by Clearbit.`;
+- Do NOT use placeholder or dead domains; pick brands whose sites resolve and have a recognizable favicon.`;
 
   const prompt = `Category label: "${topic}". ${categoryInstructions}${uniquenessBlock}
 
@@ -250,11 +251,7 @@ Format your response as JSON:
         }
       }
       if (kind === "guess_the_logo") {
-        // Improve reliability by requesting a sized raster format when no querystring is provided.
-        question = question.replace(
-          /^\s*Logo\s*[:\-]\s*(https:\/\/logo\.clearbit\.com\/[^\s?]+)\s*$/gim,
-          (_m: string, url: string) => `Logo: ${url}?size=256&format=png`
-        );
+        question = rewriteLogoUrlsInQuestionText(question);
         if (/^\s*Logo\s*[:\-]\s*https?:\/\/\S+\s*$/i.test(question)) {
           question = `${question}\nWhich brand's logo is this?`;
         }
@@ -268,7 +265,10 @@ Format your response as JSON:
       if (kind === "guess_the_flag" && !/flag(?:\s*url)?\s*[:\-]\s*https:\/\/flagcdn\.com\//i.test(question)) {
         continue;
       }
-      if (kind === "guess_the_logo" && !/logo(?:\s*url)?\s*[:\-]\s*https:\/\/logo\.clearbit\.com\//i.test(question)) {
+      if (
+        kind === "guess_the_logo" &&
+        !/logo(?:\s*url)?\s*[:\-]\s*https:\/\/www\.google\.com\/s2\/favicons\?/i.test(question)
+      ) {
         continue;
       }
       if (kind === "math" && isTriviallySimpleMathQuestion(question)) {

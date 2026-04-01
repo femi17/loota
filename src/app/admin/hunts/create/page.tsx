@@ -573,7 +573,7 @@ export default function CreateHuntPage() {
                 <p className="text-sm text-slate-700 leading-relaxed">
                   Each checkpoint uses one of these four types, in order, then repeats:{" "}
                   <span className="font-bold">{HUNT_QUESTION_CATEGORIES.join(" → ")}</span>.
-                  “Guess the logo” and “Guess the flag” show an image in the app (Clearbit + FlagCDN URLs in the AI question).
+                  “Guess the logo” and “Guess the flag” show an image in the app (Google favicon by domain + FlagCDN URLs in the AI question).
                 </p>
               </div>
 

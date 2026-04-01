@@ -1,7 +1,7 @@
 /**
  * Quiz prompts may embed media on their own lines (from OpenAI):
  *   Flag: https://flagcdn.com/w320/ng.png
- *   Logo: https://logo.clearbit.com/nike.com
+ *   Logo: https://www.google.com/s2/favicons?domain=nike.com&sz=128
  * Strip those for readable text; return URLs for <img>.
  */
 export type QuizPromptMedia = { kind: "flag" | "logo"; url: string };
