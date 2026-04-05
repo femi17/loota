@@ -95,9 +95,15 @@ type MapboxGeocodeResult = {
   placeText?: string;
 };
 
+type MapboxGeocodeOptions = {
+  /** Bias results toward this point (e.g. verified LGA center). */
+  proximity?: { lng: number; lat: number };
+};
+
 /** Resolve a place query to Mapbox coordinates and display name (Nigeria). Returns null if no result or outside Nigeria. Includes context for state/LGA validation. */
 async function mapboxGeocode(
   query: string,
+  options?: MapboxGeocodeOptions,
 ): Promise<MapboxGeocodeResult | null> {
   if (!MAPBOX_TOKEN || !query.trim()) return null;
   const url = new URL(
@@ -107,6 +113,12 @@ async function mapboxGeocode(
   url.searchParams.set("limit", "1");
   url.searchParams.set("country", "ng");
   url.searchParams.set("bbox", "2.69,4.27,14.68,13.90");
+  if (options?.proximity) {
+    url.searchParams.set(
+      "proximity",
+      `${options.proximity.lng},${options.proximity.lat}`,
+    );
+  }
   url.searchParams.set(
     "types",
     "address,poi,place,neighborhood,locality,region,district",
@@ -159,29 +171,218 @@ function normalizeStateName(name: string): string {
     .replace(/\s+/g, " ");
 }
 
-/** Check if Mapbox result is within the expected state and optionally LGA. */
-function isLocationInStateAndLga(
-  result: MapboxGeocodeResult,
-  expectedState: string,
-  expectedLga?: string | null,
-): boolean {
-  if (!expectedState || !expectedState.trim()) return true;
-  const normState = normalizeStateName(expectedState);
-  const resultRegion = normalizeStateName(result.regionText ?? "");
-  if (!resultRegion || resultRegion !== normState) return false;
-  if (!expectedLga || !expectedLga.trim()) return true;
-  const normLga = normalizeStateName(expectedLga);
-  const resultDistrict = normalizeStateName(result.districtText ?? "");
-  const resultPlace = normalizeStateName(result.placeText ?? "");
-  const resultPlaceName = normalizeStateName(result.place_name ?? "");
-  return (
-    resultDistrict.includes(normLga) ||
-    normLga.includes(resultDistrict) ||
-    resultPlace.includes(normLga) ||
-    normLga.includes(resultPlace) ||
-    resultPlaceName.includes(normLga) ||
-    normLga.includes(resultPlaceName)
+/** Reverse-geocode aggregate for authoritative “what LGA/state is this coordinate in?”. */
+type ReverseAgg = {
+  allTextLower: string;
+  regionText?: string;
+  districtText?: string;
+  place_name: string;
+};
+
+async function mapboxReverseAggregate(lng: number, lat: number): Promise<ReverseAgg | null> {
+  if (!MAPBOX_TOKEN || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  const url = new URL(
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json`,
   );
+  url.searchParams.set("access_token", MAPBOX_TOKEN);
+  url.searchParams.set("limit", "5");
+  url.searchParams.set(
+    "types",
+    "country,region,district,place,locality,neighborhood,address,poi",
+  );
+  const res = await fetch(url.toString(), {
+    headers: { "User-Agent": "loota-admin-reverse" },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  const features = json?.features;
+  if (!Array.isArray(features) || features.length === 0) return null;
+  const texts: string[] = [];
+  let regionText: string | undefined;
+  let districtText: string | undefined;
+  let place_name = "";
+  for (const feature of features) {
+    const pn = String(feature?.place_name ?? "").trim();
+    if (pn) {
+      texts.push(pn);
+      if (!place_name) place_name = pn;
+    }
+    const tx = String(feature?.text ?? "").trim();
+    if (tx) texts.push(tx);
+    const context = feature?.context as Array<{ id?: string; text?: string }> | undefined;
+    if (Array.isArray(context)) {
+      for (const c of context) {
+        const id = (c?.id ?? "").toString();
+        const t = (c?.text ?? "").toString().trim();
+        if (!t) continue;
+        texts.push(t);
+        if (id.startsWith("region.")) regionText = t;
+        if (id.startsWith("district.")) districtText = t;
+      }
+    }
+  }
+  if (!place_name && texts[0]) place_name = texts[0]!;
+  return {
+    allTextLower: texts.join(" ").toLowerCase(),
+    regionText,
+    districtText,
+    place_name: place_name || `${lat}, ${lng}`,
+  };
+}
+
+function stateMatchesReverseRegion(expectedState: string, regionText: string | undefined): boolean {
+  const exp = normalizeStateName(expectedState);
+  const reg = normalizeStateName(regionText ?? "");
+  if (!reg) return false;
+  if (reg === exp) return true;
+  if (exp === "abuja" && /federal capital|fct|abuja/i.test(reg)) return true;
+  return false;
+}
+
+/** Whether reverse-geocode text reliably mentions the expected LGA (handles slashes, hyphens). */
+function reverseTextMentionsLga(allTextLower: string, expectedLga: string): boolean {
+  const raw = expectedLga.trim();
+  if (!raw) return false;
+  const segments = raw.split("/").map((s) => s.trim()).filter(Boolean);
+  const variants = new Set<string>();
+  for (const seg of segments.length > 0 ? segments : [raw]) {
+    const n = normalizeStateName(seg).replace(/-/g, " ");
+    variants.add(n.replace(/\s+/g, ""));
+    variants.add(n);
+    for (const token of n.split(/\s+/)) {
+      if (token.length >= 4) variants.add(token);
+    }
+  }
+  for (const v of variants) {
+    if (v.length >= 3 && allTextLower.includes(v)) return true;
+  }
+  return false;
+}
+
+/**
+ * Mapbox forward results can land in the wrong LGA (e.g. “Badagry” query → Lagos mainland).
+ * Reverse-geocode the coordinates and require state + LGA to appear in the response.
+ */
+async function verifyCoordinatesWithMapboxReverse(
+  lng: number,
+  lat: number,
+  expectedState: string,
+  expectedLga: string | null,
+): Promise<boolean> {
+  const agg = await mapboxReverseAggregate(lng, lat);
+  if (!agg) return false;
+  if (!stateMatchesReverseRegion(expectedState, agg.regionText)) return false;
+  if (!expectedLga?.trim()) return true;
+  return reverseTextMentionsLga(agg.allTextLower, expectedLga);
+}
+
+/** Find a coordinate inside the LGA using seed geocodes + optional random jitter; all points reverse-verified. */
+async function resolveCoordinatesInsideLga(
+  expectedLga: string,
+  expectedState: string,
+  seenKeys: Set<string>,
+  keyFn: (lat: number, lng: number) => string,
+  preferredQueries: string[],
+): Promise<MapboxGeocodeResult | null> {
+  const seedQueries = [
+    ...preferredQueries.filter(Boolean),
+    `${expectedLga}, ${expectedState}, Nigeria`,
+    `${expectedLga} Local Government Area, ${expectedState}, Nigeria`,
+    `${expectedLga} LGA, ${expectedState}, Nigeria`,
+  ];
+  const uniqSeeds = [...new Set(seedQueries.map((q) => q.trim()).filter(Boolean))];
+
+  let verifiedCenter: { lng: number; lat: number } | null = null;
+  for (const q of uniqSeeds) {
+    const r = await mapboxGeocode(q);
+    if (!r || !isInNigeria(r.lng, r.lat)) continue;
+    if (
+      !(await verifyCoordinatesWithMapboxReverse(r.lng, r.lat, expectedState, expectedLga))
+    ) {
+      continue;
+    }
+    const k = keyFn(r.lat, r.lng);
+    verifiedCenter = { lng: r.lng, lat: r.lat };
+    if (!seenKeys.has(k)) {
+      const agg = await mapboxReverseAggregate(r.lng, r.lat);
+      return {
+        ...r,
+        place_name: agg?.place_name ?? r.place_name,
+        regionText: agg?.regionText ?? r.regionText,
+        districtText: agg?.districtText ?? r.districtText,
+      };
+    }
+    for (let micro = 0; micro < 14; micro++) {
+      const jlng = r.lng + (Math.random() - 0.5) * 0.004;
+      const jlat = r.lat + (Math.random() - 0.5) * 0.004;
+      if (!isInNigeria(jlng, jlat)) continue;
+      if (
+        !(await verifyCoordinatesWithMapboxReverse(jlng, jlat, expectedState, expectedLga))
+      ) {
+        continue;
+      }
+      const k2 = keyFn(jlat, jlng);
+      if (seenKeys.has(k2)) continue;
+      const agg = await mapboxReverseAggregate(jlng, jlat);
+      return {
+        lng: jlng,
+        lat: jlat,
+        place_name: agg?.place_name ?? r.place_name,
+        regionText: agg?.regionText ?? r.regionText,
+        districtText: agg?.districtText ?? r.districtText,
+        placeText: undefined,
+      };
+    }
+  }
+
+  if (!verifiedCenter) return null;
+
+  const proximity = verifiedCenter;
+  for (const q of uniqSeeds) {
+    const r = await mapboxGeocode(q, { proximity });
+    if (!r || !isInNigeria(r.lng, r.lat)) continue;
+    if (
+      !(await verifyCoordinatesWithMapboxReverse(r.lng, r.lat, expectedState, expectedLga))
+    ) {
+      continue;
+    }
+    const k = keyFn(r.lat, r.lng);
+    if (!seenKeys.has(k)) {
+      const agg = await mapboxReverseAggregate(r.lng, r.lat);
+      return {
+        ...r,
+        place_name: agg?.place_name ?? r.place_name,
+        regionText: agg?.regionText ?? r.regionText,
+        districtText: agg?.districtText ?? r.districtText,
+      };
+    }
+  }
+
+  const span = 0.055;
+  for (let attempt = 0; attempt < 22; attempt++) {
+    const lng = verifiedCenter.lng + (Math.random() - 0.5) * span;
+    const lat = verifiedCenter.lat + (Math.random() - 0.5) * span;
+    if (!isInNigeria(lng, lat)) continue;
+    if (
+      !(await verifyCoordinatesWithMapboxReverse(lng, lat, expectedState, expectedLga))
+    ) {
+      continue;
+    }
+    const k = keyFn(lat, lng);
+    if (seenKeys.has(k)) continue;
+    const agg = await mapboxReverseAggregate(lng, lat);
+    return {
+      lng,
+      lat,
+      place_name: agg?.place_name ?? `${expectedLga}, ${expectedState}`,
+      regionText: agg?.regionText,
+      districtText: agg?.districtText,
+      placeText: undefined,
+    };
+  }
+
+  return null;
 }
 
 /** Parse expected state from OpenAI-style query "Place, State, Nigeria". */
@@ -211,6 +412,7 @@ Rules:
 - Each query MUST include the LGA name in the string (middle segment), e.g. "Oshodi Bus Terminal, Oshodi-Isolo, ${state}, Nigeria".
 - Use DIFFERENT venue types across rows (market, stadium, hospital, junction, mall, school, park, bus stop) — do not repeat the same venue name twice.
 - Prefer real places Mapbox can geocode in Nigeria.
+- The server reverse-geocodes every waypoint and discards coordinates that are not inside the named LGA—queries must name places that actually lie in that LGA.
 - Avoid vague names like only "Market, Lagos, Nigeria" without LGA context.
 - Format each as: "Place name, LGA name, ${state}, Nigeria"
 - Keep each query short and geocoding-friendly.
@@ -420,44 +622,76 @@ Return your response as JSON:
       const expectedState = singleState ?? parseStateFromQuery(waypointQueries[i] ?? "") ?? "";
       const expectedLga = singleState ? (selectedLgasForWaypoints[i] ?? (i === 0 ? chosenLga : null)) : null;
       let result: MapboxGeocodeResult | null = null;
-      const queriesToTry: string[] = [];
-      if (singleState) {
+
+      const stateForLga =
+        (expectedState && expectedState.trim()) || (singleState && singleState.trim()) || "";
+      if (singleState && expectedLga && stateForLga) {
+        const preferred: string[] = [];
+        const primary = waypointQueries[i];
+        if (primary) preferred.push(primary);
         const lgas = getLgasForState(singleState);
         if (lgas.length > 0) {
-          const primary = waypointQueries[i];
-          if (primary) queriesToTry.push(primary);
-          const others = lgas.filter((lga) => `${lga}, ${singleState}, Nigeria` !== primary);
+          const others = lgas.filter((lga) => primary !== `${lga}, ${singleState}, Nigeria`);
           const shuffledOthers = [...others];
           for (let si = shuffledOthers.length - 1; si > 0; si--) {
             const j = Math.floor(Math.random() * (si + 1));
             [shuffledOthers[si], shuffledOthers[j]] = [shuffledOthers[j]!, shuffledOthers[si]!];
           }
-          shuffledOthers.slice(0, Math.min(MAX_RETRIES - 1, shuffledOthers.length)).forEach((lga) => {
-            queriesToTry.push(`${lga}, ${singleState}, Nigeria`);
-          });
-        } else {
-          queriesToTry.push(`${singleState}, Nigeria`);
+          shuffledOthers
+            .slice(0, Math.min(MAX_RETRIES + 3, shuffledOthers.length))
+            .forEach((lga) => preferred.push(`${lga}, ${singleState}, Nigeria`));
         }
+        result = await resolveCoordinatesInsideLga(
+          expectedLga,
+          stateForLga,
+          seenKeys,
+          waypointKey,
+          preferred,
+        );
       } else {
-        const primary = waypointQueries[i];
-        if (primary) queriesToTry.push(primary);
-        if (expectedState) queriesToTry.push(`${expectedState}, Nigeria`);
-        if (config.regionName) queriesToTry.push(`${String(config.regionName).trim()}, Nigeria`);
-      }
+        const queriesToTry: string[] = [];
+        if (singleState) {
+          const lgas = getLgasForState(singleState);
+          if (lgas.length > 0) {
+            const primary = waypointQueries[i];
+            if (primary) queriesToTry.push(primary);
+            queriesToTry.push(`${singleState}, Nigeria`);
+          } else {
+            queriesToTry.push(`${singleState}, Nigeria`);
+          }
+        } else {
+          const primary = waypointQueries[i];
+          if (primary) queriesToTry.push(primary);
+          if (expectedState) queriesToTry.push(`${expectedState}, Nigeria`);
+          if (config.regionName) queriesToTry.push(`${String(config.regionName).trim()}, Nigeria`);
+        }
 
-      for (let attempt = 0; attempt < Math.min(MAX_RETRIES, Math.max(1, queriesToTry.length)); attempt++) {
-        const query = queriesToTry[attempt] ?? queriesToTry[0] ?? "";
-        if (!query) continue;
-        result = await mapboxGeocode(query);
-        if (
-          result &&
-          isInNigeria(result.lng, result.lat) &&
-          (!expectedState || isLocationInStateAndLga(result, expectedState, expectedLga)) &&
-          !seenKeys.has(waypointKey(result.lat, result.lng))
-        ) {
+        for (let attempt = 0; attempt < Math.min(MAX_RETRIES, Math.max(1, queriesToTry.length)); attempt++) {
+          const query = queriesToTry[attempt] ?? queriesToTry[0] ?? "";
+          if (!query) continue;
+          result = await mapboxGeocode(query);
+          if (!result || !isInNigeria(result.lng, result.lat)) {
+            result = null;
+            continue;
+          }
+          if (
+            expectedState &&
+            !(await verifyCoordinatesWithMapboxReverse(
+              result.lng,
+              result.lat,
+              expectedState,
+              expectedLga,
+            ))
+          ) {
+            result = null;
+            continue;
+          }
+          if (seenKeys.has(waypointKey(result.lat, result.lng))) {
+            result = null;
+            continue;
+          }
           break;
         }
-        if (result && seenKeys.has(waypointKey(result.lat, result.lng))) result = null;
       }
 
       if (result && isInNigeria(result.lng, result.lat)) {
@@ -470,11 +704,27 @@ Return your response as JSON:
             lat: result.lat,
           });
         }
+      } else if (singleState && expectedLga) {
+        logger.warn("admin/generate-hunt-config", "No Mapbox-verified point inside LGA (waypoint skipped)", {
+          index: i,
+          expectedLga,
+          expectedState: stateForLga,
+        });
       } else {
         const stateFallback = (singleState || expectedState || config.regionName)?.trim();
         const fallbackQuery = stateFallback ? `${stateFallback}, Nigeria` : "Lagos, Nigeria";
         const fallback = MAPBOX_TOKEN ? await mapboxGeocode(fallbackQuery) : null;
-        if (fallback && isInNigeria(fallback.lng, fallback.lat)) {
+        const fallbackOk =
+          fallback &&
+          isInNigeria(fallback.lng, fallback.lat) &&
+          (!stateFallback ||
+            (await verifyCoordinatesWithMapboxReverse(
+              fallback.lng,
+              fallback.lat,
+              stateFallback,
+              null,
+            )));
+        if (fallbackOk) {
           const key = waypointKey(fallback.lat, fallback.lng);
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
