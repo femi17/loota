@@ -303,6 +303,74 @@ async function verifyCoordinatesStateOnly(
   return stateAppearsInReverseAgg(agg, expectedState);
 }
 
+function shuffleCopy<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+/** State verified on map; micro-jitter if coordinate collides with an existing waypoint. */
+async function tryStateVerifiedLgaCentroid(
+  lga: string,
+  state: string,
+  seenKeys: Set<string>,
+  keyFn: (lat: number, lng: number) => string,
+): Promise<MapboxGeocodeResult | null> {
+  let emergency = await mapboxGeocode(`${lga}, ${state}, Nigeria`);
+  if (
+    !emergency ||
+    !isInNigeria(emergency.lng, emergency.lat) ||
+    !(await verifyCoordinatesStateOnly(emergency.lng, emergency.lat, state))
+  ) {
+    return null;
+  }
+  let key = keyFn(emergency.lat, emergency.lng);
+  if (seenKeys.has(key)) {
+    for (let micro = 0; micro < 16; micro++) {
+      const jlng = emergency.lng + (Math.random() - 0.5) * 0.008;
+      const jlat = emergency.lat + (Math.random() - 0.5) * 0.008;
+      if (!isInNigeria(jlng, jlat)) continue;
+      if (!(await verifyCoordinatesStateOnly(jlng, jlat, state))) continue;
+      const k2 = keyFn(jlat, jlng);
+      if (seenKeys.has(k2)) continue;
+      emergency = {
+        lng: jlng,
+        lat: jlat,
+        place_name: emergency.place_name,
+        regionText: emergency.regionText,
+        districtText: emergency.districtText,
+        placeText: emergency.placeText,
+      };
+      key = k2;
+      break;
+    }
+  }
+  if (seenKeys.has(keyFn(emergency.lat, emergency.lng))) return null;
+  const agg = await mapboxReverseAggregate(emergency.lng, emergency.lat);
+  return {
+    ...emergency,
+    place_name: agg?.place_name ?? emergency.place_name,
+    regionText: agg?.regionText ?? emergency.regionText,
+    districtText: agg?.districtText ?? emergency.districtText,
+  };
+}
+
+/** Last resort: trust forward geocode inside Nigeria bbox (Mapbox reverse sometimes omits state/LGA text). */
+async function tryForwardOnlyLga(
+  lga: string,
+  state: string,
+  seenKeys: Set<string>,
+  keyFn: (lat: number, lng: number) => string,
+): Promise<MapboxGeocodeResult | null> {
+  const r = await mapboxGeocode(`${lga}, ${state}, Nigeria`);
+  if (!r || !isInNigeria(r.lng, r.lat)) return null;
+  if (seenKeys.has(keyFn(r.lat, r.lng))) return null;
+  return r;
+}
+
 /** Find a coordinate inside the LGA using seed geocodes + optional random jitter; all points reverse-verified. */
 async function resolveCoordinatesInsideLga(
   expectedLga: string,
@@ -653,38 +721,58 @@ Return your response as JSON:
     /** Key for dedup: same (lat,lng) rounded to 5 decimals = same waypoint */
     const waypointKey = (lat: number, lng: number) => `${Number(lat.toFixed(5))},${Number(lng.toFixed(5))}`;
     const seenKeys = new Set<string>();
+    const geocodeWarnings: string[] = [];
 
     for (let i = 0; i < n; i++) {
       const expectedState = singleState ?? parseStateFromQuery(waypointQueries[i] ?? "") ?? "";
-      const expectedLga = singleState ? (selectedLgasForWaypoints[i] ?? (i === 0 ? chosenLga : null)) : null;
+      const primaryLgaForSlot = singleState
+        ? (selectedLgasForWaypoints[i] ?? (i === 0 ? chosenLga : null))
+        : null;
       let result: MapboxGeocodeResult | null = null;
+      let labelLga: string | null = primaryLgaForSlot;
 
       const stateForLga =
         (expectedState && expectedState.trim()) || (singleState && singleState.trim()) || "";
-      if (singleState && expectedLga && stateForLga) {
-        const preferred: string[] = [];
-        const primary = waypointQueries[i];
-        if (primary) preferred.push(primary);
-        const lgas = getLgasForState(singleState);
-        if (lgas.length > 0) {
-          const others = lgas.filter((lga) => primary !== `${lga}, ${singleState}, Nigeria`);
-          const shuffledOthers = [...others];
-          for (let si = shuffledOthers.length - 1; si > 0; si--) {
-            const j = Math.floor(Math.random() * (si + 1));
-            [shuffledOthers[si], shuffledOthers[j]] = [shuffledOthers[j]!, shuffledOthers[si]!];
+      const allStateLgas = singleState ? getLgasForState(singleState) : [];
+
+      if (singleState && stateForLga && allStateLgas.length > 0) {
+        const primary =
+          primaryLgaForSlot && allStateLgas.includes(primaryLgaForSlot)
+            ? primaryLgaForSlot
+            : allStateLgas[i % allStateLgas.length]!;
+        const others = shuffleCopy(allStateLgas.filter((l) => l !== primary));
+        const lgaCandidates = [primary, ...others];
+
+        for (const lgaTry of lgaCandidates) {
+          const preferred: string[] = [];
+          if (lgaTry === primary && waypointQueries[i]) preferred.push(waypointQueries[i]!);
+          preferred.push(`${lgaTry}, ${stateForLga}, Nigeria`);
+
+          result = await resolveCoordinatesInsideLga(
+            lgaTry,
+            stateForLga,
+            seenKeys,
+            waypointKey,
+            preferred,
+          );
+          if (!result) {
+            result = await tryStateVerifiedLgaCentroid(lgaTry, stateForLga, seenKeys, waypointKey);
           }
-          shuffledOthers
-            .slice(0, Math.min(MAX_RETRIES + 3, shuffledOthers.length))
-            .forEach((lga) => preferred.push(`${lga}, ${singleState}, Nigeria`));
+          if (!result) {
+            result = await tryForwardOnlyLga(lgaTry, stateForLga, seenKeys, waypointKey);
+          }
+          if (result) {
+            labelLga = lgaTry;
+            if (lgaTry !== primary) {
+              geocodeWarnings.push(
+                `Checkpoint ${i + 1}: could not lock “${primary}” on the map; used “${lgaTry}” instead.`,
+              );
+            }
+            break;
+          }
         }
-        result = await resolveCoordinatesInsideLga(
-          expectedLga,
-          stateForLga,
-          seenKeys,
-          waypointKey,
-          preferred,
-        );
       } else {
+        const expectedLga = primaryLgaForSlot;
         const queriesToTry: string[] = [];
         if (singleState) {
           const lgas = getLgasForState(singleState);
@@ -728,6 +816,19 @@ Return your response as JSON:
           }
           break;
         }
+
+        if (!result && singleState && stateForLga) {
+          for (const lgaTry of shuffleCopy(getLgasForState(singleState))) {
+            result = await tryForwardOnlyLga(lgaTry, stateForLga, seenKeys, waypointKey);
+            if (result) {
+              labelLga = lgaTry;
+              geocodeWarnings.push(
+                `Checkpoint ${i + 1}: used forward geocode for “${lgaTry}” (reverse verify was inconclusive).`,
+              );
+              break;
+            }
+          }
+        }
       }
 
       if (result && isInNigeria(result.lng, result.lat)) {
@@ -735,65 +836,16 @@ Return your response as JSON:
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           waypoints.push({
-            label: buildWaypointLabel(result, expectedLga, singleState),
+            label: buildWaypointLabel(result, labelLga, singleState),
             lng: result.lng,
             lat: result.lat,
           });
-        }
-      } else if (singleState && expectedLga) {
-        logger.warn(
-          "admin/generate-hunt-config",
-          "Strict LGA verify failed; trying state-verified LGA centroid fallback",
-          { index: i, expectedLga, expectedState: stateForLga },
-        );
-        let emergency = await mapboxGeocode(`${expectedLga}, ${stateForLga}, Nigeria`);
-        if (
-          emergency &&
-          isInNigeria(emergency.lng, emergency.lat) &&
-          (await verifyCoordinatesStateOnly(emergency.lng, emergency.lat, stateForLga))
-        ) {
-          let key = waypointKey(emergency.lat, emergency.lng);
-          if (seenKeys.has(key)) {
-            for (let micro = 0; micro < 12; micro++) {
-              const jlng = emergency.lng + (Math.random() - 0.5) * 0.006;
-              const jlat = emergency.lat + (Math.random() - 0.5) * 0.006;
-              if (!isInNigeria(jlng, jlat)) continue;
-              if (!(await verifyCoordinatesStateOnly(jlng, jlat, stateForLga))) continue;
-              const k2 = waypointKey(jlat, jlng);
-              if (seenKeys.has(k2)) continue;
-              emergency = {
-                lng: jlng,
-                lat: jlat,
-                place_name: emergency.place_name,
-                regionText: emergency.regionText,
-                districtText: emergency.districtText,
-                placeText: emergency.placeText,
-              };
-              key = k2;
-              break;
-            }
-          }
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            const agg = await mapboxReverseAggregate(emergency.lng, emergency.lat);
-            const enriched: MapboxGeocodeResult = {
-              ...emergency,
-              place_name: agg?.place_name ?? emergency.place_name,
-              regionText: agg?.regionText ?? emergency.regionText,
-              districtText: agg?.districtText ?? emergency.districtText,
-            };
-            waypoints.push({
-              label: buildWaypointLabel(enriched, expectedLga, singleState),
-              lng: enriched.lng,
-              lat: enriched.lat,
-            });
-          }
         }
       } else {
         const stateFallback = (singleState || expectedState || config.regionName)?.trim();
         const fallbackQuery = stateFallback ? `${stateFallback}, Nigeria` : "Lagos, Nigeria";
         const fallback = MAPBOX_TOKEN ? await mapboxGeocode(fallbackQuery) : null;
-        const fallbackOk =
+        let fallbackOk =
           fallback &&
           isInNigeria(fallback.lng, fallback.lat) &&
           (!stateFallback ||
@@ -803,12 +855,18 @@ Return your response as JSON:
               stateFallback,
               null,
             )));
-        if (fallbackOk) {
+        if (!fallbackOk && fallback && isInNigeria(fallback.lng, fallback.lat)) {
+          fallbackOk = true;
+          geocodeWarnings.push(
+            `Checkpoint ${i + 1}: used “${stateFallback || "Lagos"}, Nigeria” without full reverse verify.`,
+          );
+        }
+        if (fallbackOk && fallback) {
           const key = waypointKey(fallback.lat, fallback.lng);
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
             waypoints.push({
-              label: buildWaypointLabel(fallback, expectedLga, singleState),
+              label: buildWaypointLabel(fallback, primaryLgaForSlot, singleState),
               lng: fallback.lng,
               lat: fallback.lat,
             });
@@ -822,12 +880,13 @@ Return your response as JSON:
             seenKeys.add(key);
             waypoints.push({
               label:
-                expectedLga && singleState
-                  ? `Checkpoint · ${expectedLga}, ${singleState}`
+                primaryLgaForSlot && singleState
+                  ? `Checkpoint · ${primaryLgaForSlot}, ${singleState}`
                   : config.regionName || "Checkpoint",
               lng: jitterLng,
               lat: jitterLat,
             });
+            geocodeWarnings.push(`Checkpoint ${i + 1}: approximate coordinates (Mapbox did not return a place).`);
           }
         }
       }
@@ -866,7 +925,6 @@ Return your response as JSON:
         const q = lgaForRow ? `${lgaForRow}, ${st}, Nigeria` : `${st}, Nigeria`;
         const r = await mapboxGeocode(q);
         if (!r || !isInNigeria(r.lng, r.lat)) continue;
-        if (!(await verifyCoordinatesStateOnly(r.lng, r.lat, st))) continue;
         const k = waypointKey(r.lat, r.lng);
         if (used.has(k)) continue;
         used.add(k);
@@ -889,15 +947,42 @@ Return your response as JSON:
           requested: n,
         });
         finalWaypoints = recovered;
+        geocodeWarnings.push("Some checkpoints were recovered using a backup geocode pass.");
       }
     }
 
+    /** Pad to target count with forward-only LGA hits (single state) or state centroid. */
+    const usedKeysFinal = new Set(finalWaypoints.map((w) => waypointKey(w.lat, w.lng)));
+    while (finalWaypoints.length < n && singleState && getLgasForState(singleState).length > 0) {
+      let added = false;
+      for (const lgaTry of shuffleCopy(getLgasForState(singleState))) {
+        const r = await tryForwardOnlyLga(lgaTry, singleState, usedKeysFinal, waypointKey);
+        if (!r) continue;
+        usedKeysFinal.add(waypointKey(r.lat, r.lng));
+        finalWaypoints.push({
+          label: buildWaypointLabel(r, lgaTry, singleState),
+          lng: r.lng,
+          lat: r.lat,
+        });
+        geocodeWarnings.push(
+          `Added checkpoint ${finalWaypoints.length} at “${lgaTry}” to reach ${n} locations (forward geocode).`,
+        );
+        added = true;
+        break;
+      }
+      if (!added) break;
+    }
+
+    const wpLen = finalWaypoints.length;
     config.waypoints = finalWaypoints;
-    config.keysToWin = finalWaypoints.length;
-    config.numberOfHunts = finalWaypoints.length;
-    if (finalWaypoints.length === 0 && n > 0) {
+    config.keysToWin = wpLen;
+    config.numberOfHunts = wpLen;
+    config.questionCategories = buildRotatedQuestionCategories(wpLen > 0 ? wpLen : n);
+    (config as { geocodeWarnings?: string[] }).geocodeWarnings = geocodeWarnings;
+
+    if (wpLen === 0 && n > 0) {
       (config as { geocodeError?: string }).geocodeError =
-        "Mapbox returned no usable coordinates for this hunt. Check your Mapbox token, billing, and network, then try Generate again.";
+        "Could not resolve any map coordinates. Confirm MAPBOX_SECRET_TOKEN (or NEXT_PUBLIC_MAPBOX_TOKEN) on the server, Mapbox Geocoding API access, and try Generate again.";
     }
 
     // Align start with first waypoint so hunt start and first destination match (avoids e.g. start in Kano but waypoints in Lagos)

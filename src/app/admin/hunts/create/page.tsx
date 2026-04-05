@@ -13,6 +13,8 @@ type HuntConfig = {
   keysToWin: number;
   /** Set when Mapbox could not resolve any waypoints */
   geocodeError?: string;
+  /** Non-fatal: e.g. swapped LGA when the planned one could not be verified */
+  geocodeWarnings?: string[];
   regionName?: string;
   startLocation?: { lng: number; lat: number };
   waypoints?: Array<{ label: string; lng: number; lat: number }>;
@@ -155,13 +157,20 @@ export default function CreateHuntPage() {
         throw new Error((errBody as { error?: string }).error || "Failed to generate hunt configuration");
       }
 
-      const huntConfig = (await configRes.json()) as HuntConfig & { geocodeError?: string };
+      const huntConfig = (await configRes.json()) as HuntConfig & {
+        geocodeError?: string;
+        geocodeWarnings?: string[];
+      };
       setConfig(huntConfig);
       if (huntConfig.geocodeError) {
         alert(huntConfig.geocodeError);
       } else if (!Array.isArray(huntConfig.waypoints) || huntConfig.waypoints.length === 0) {
         alert(
-          "Generate completed but no waypoints were returned. Check Mapbox token (MAPBOX_SECRET_TOKEN or NEXT_PUBLIC_MAPBOX_TOKEN) and try again.",
+          "Generate completed but no waypoints were returned. Check Mapbox token on the server (MAPBOX_SECRET_TOKEN is best for API routes) and try again.",
+        );
+      } else if (huntConfig.geocodeWarnings?.length) {
+        alert(
+          `Hunt locations ready with ${huntConfig.waypoints.length} checkpoint(s).\n\nNotes:\n${huntConfig.geocodeWarnings.slice(0, 6).join("\n")}${huntConfig.geocodeWarnings.length > 6 ? "\n…" : ""}`,
         );
       }
       // Questions are NOT pre-generated: AI will generate a fresh question per player when they reach each location (see get-question API).
@@ -636,13 +645,17 @@ export default function CreateHuntPage() {
                     <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">
                       Number of Hunts
                     </p>
-                    <p className="text-2xl font-extrabold text-[#0F172A]">{config.numberOfHunts}</p>
+                    <p className="text-2xl font-extrabold text-[#0F172A]">
+                      {config.waypoints?.length ?? config.numberOfHunts}
+                    </p>
                   </div>
                   <div className="p-4 bg-[#F8FAFC] rounded-xl border border-[#F1F5F9]">
                     <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">
                       Keys to Win
                     </p>
-                    <p className="text-2xl font-extrabold text-[#0F172A]">{config.keysToWin}</p>
+                    <p className="text-2xl font-extrabold text-[#0F172A]">
+                      {config.waypoints?.length ?? config.keysToWin}
+                    </p>
                   </div>
                   <div className="p-4 bg-[#F8FAFC] rounded-xl border border-[#F1F5F9]">
                     <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">
@@ -658,6 +671,35 @@ export default function CreateHuntPage() {
                     <p className="text-lg font-extrabold text-[#0F172A]">{config.questionCategories.length}</p>
                   </div>
                 </div>
+
+                {config.geocodeWarnings && config.geocodeWarnings.length > 0 && (
+                  <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-950 text-sm">
+                    <p className="font-extrabold text-xs uppercase tracking-widest mb-2">Location notes</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {config.geocodeWarnings.map((w, idx) => (
+                        <li key={idx}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {Array.isArray(config.waypoints) && config.waypoints.length > 0 && (
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">
+                      Checkpoints (waypoints)
+                    </p>
+                    <ol className="list-decimal pl-5 space-y-2 text-sm text-[#0F172A]">
+                      {config.waypoints.map((w, idx) => (
+                        <li key={idx} className="pl-1">
+                          <span className="font-bold">{w.label}</span>
+                          <span className="text-slate-500 font-mono text-xs block sm:inline sm:ml-2">
+                            {Number(w.lat).toFixed(5)}, {Number(w.lng).toFixed(5)}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
