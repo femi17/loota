@@ -4525,6 +4525,9 @@ export default function HuntsPage() {
           const busStop = () => {
             const pausedAt = Date.now();
             pauseRef.current = { startedAt: pausedAt };
+            // Bus boarding/alighting is free and auto-resumes; clear any stale constraint so gateway never shows Pay here.
+            setStopFlow(null);
+            setClock(pausedAt);
             setTravelPause({
               kind: "bus_stop",
               label: "Bus stop: alight / board",
@@ -6304,6 +6307,13 @@ export default function HuntsPage() {
     return () => window.clearInterval(tick);
   }, [stopFlow]);
 
+  // Bus stop countdown (drawer + gateway) must tick; travel RAF returns early while paused and otherwise does not update clock.
+  useEffect(() => {
+    if (travelPause?.kind !== "bus_stop") return;
+    const tick = window.setInterval(() => setClock(Date.now()), 250);
+    return () => window.clearInterval(tick);
+  }, [travelPause?.kind, travelPause?.startedAt]);
+
   useEffect(() => {
     if (!stopFlow) return;
     if (stopFlow.status !== "relaxing") return;
@@ -6928,7 +6938,7 @@ export default function HuntsPage() {
               ? Math.max(
                   0,
                   Math.ceil(
-                    (Math.max(1000, travelPause.totalMs) - Math.max(0, Date.now() - travelPause.startedAt)) /
+                    (Math.max(1000, travelPause.totalMs) - Math.max(0, clock - travelPause.startedAt)) /
                       1000,
                   ),
                 )
@@ -6978,16 +6988,23 @@ export default function HuntsPage() {
               : null
         }
         actionLabel={
-          (stopFlow?.status === "ready_to_pay" || (hospitalStay != null && (hospitalStay.durationMs - (Date.now() - hospitalStay.startedAt)) <= 0))
-            ? (hospitalStay != null
-                ? (hospitalStay.costCoins > 0 ? `Pay ${formatCoins(hospitalStay.costCoins)}` : "Go")
+          travelPause?.kind === "bus_stop"
+            ? null
+            : stopFlow?.status === "ready_to_pay" ||
+                (hospitalStay != null && (hospitalStay.durationMs - (Date.now() - hospitalStay.startedAt)) <= 0)
+              ? hospitalStay != null
+                ? hospitalStay.costCoins > 0
+                  ? `Pay ${formatCoins(hospitalStay.costCoins)}`
+                  : "Go"
                 : (stopFlow?.costCoins ?? 0) > 0
                   ? `Pay ${formatCoins(stopFlow?.costCoins ?? 0)}`
-                  : "Go")
-            : null
+                  : "Go"
+              : null
         }
         onAction={
-          stopFlow?.status === "ready_to_pay"
+          travelPause?.kind === "bus_stop"
+            ? undefined
+            : stopFlow?.status === "ready_to_pay"
             ? async () => {
                 if (!stopFlow || stopFlow.status !== "ready_to_pay") return;
                 const cost = stopFlow.costCoins ?? 0;
@@ -7128,6 +7145,7 @@ export default function HuntsPage() {
               <HuntsConstraintDrawerContent
                 stopFlow={stopFlow}
                 travelPause={travelPause}
+                clock={clock}
                 credits={credits}
                 playerPos={playerPos}
                 formatNaira={formatCoins}

@@ -26,6 +26,8 @@ function getKeepGoingWarning(stopFlow: StopFlow | null): string {
 type Props = {
   stopFlow: StopFlow | null;
   travelPause: TravelPause | null;
+  /** Monotonic UI clock so bus-stop countdown updates while travel RAF is paused */
+  clock: number;
   credits: number;
   playerPos: LngLat | null;
   formatNaira: (n: number) => string;
@@ -57,6 +59,7 @@ type Props = {
 export function HuntsConstraintDrawerContent({
   stopFlow,
   travelPause,
+  clock,
   credits,
   playerPos,
   formatNaira,
@@ -94,7 +97,11 @@ export function HuntsConstraintDrawerContent({
             </p>
           </div>
           <div className="p-5 rounded-3xl bg-white border border-[#F1F5F9]">
-            <BusStopTimer startedAt={travelPause.startedAt} totalMs={travelPause.totalMs} />
+            <BusStopTimer
+              startedAt={travelPause.startedAt}
+              totalMs={travelPause.totalMs}
+              clock={clock}
+            />
           </div>
         </>
       ) : (
@@ -315,9 +322,17 @@ export function HuntsConstraintDrawerContent({
   );
 }
 
-function BusStopTimer({ startedAt, totalMs }: { startedAt: number; totalMs: number }) {
+function BusStopTimer({
+  startedAt,
+  totalMs,
+  clock,
+}: {
+  startedAt: number;
+  totalMs: number;
+  clock: number;
+}) {
   const total = Math.max(1000, totalMs);
-  const elapsedMs = Math.max(0, Date.now() - startedAt);
+  const elapsedMs = Math.max(0, clock - startedAt);
   const p = clamp(elapsedMs / total, 0, 1);
   const remainingSec = Math.max(0, Math.ceil((total - elapsedMs) / 1000));
   const mm = String(Math.floor(remainingSec / 60)).padStart(2, "0");
