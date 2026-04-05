@@ -705,11 +705,12 @@ const THRESHOLD_LABEL: Record<string, string> = {
 
 /**
  * Full snapshot (positions, travel, quiz, actions, moments).
- * Realtime on player_positions gives near-instant updates; poll is a fallback.
+ * Realtime on player_positions gives near-instant updates; poll is a fallback only.
+ * Keep poll slower than hunts heartbeats to cut duplicate egress; UI still updates via Realtime first.
  */
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 8000;
 /** Cheap roster signature — when it changes, we run a full snapshot (positions + registrations). */
-const ROSTER_POLL_MS = 1000;
+const ROSTER_POLL_MS = 3500;
 /** Auto spotlight: show each player for this long before rotating (strict 1 minute). */
 const AUTO_FOCUS_MS = 60 * 1000;
 const TOAST_LIFETIME_MS = 5000;
@@ -2676,7 +2677,7 @@ export default function BroadcastPage() {
           realtimeSnapshotDebounceRef.current = setTimeout(() => {
             realtimeSnapshotDebounceRef.current = null;
             void loadBroadcastSnapshot(false);
-          }, 120);
+          }, 280);
         }
       )
       .subscribe();
