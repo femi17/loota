@@ -11,6 +11,8 @@ import Link from "next/link";
 type HuntConfig = {
   numberOfHunts: number;
   keysToWin: number;
+  /** Set when Mapbox could not resolve any waypoints */
+  geocodeError?: string;
   regionName?: string;
   startLocation?: { lng: number; lat: number };
   waypoints?: Array<{ label: string; lng: number; lat: number }>;
@@ -153,8 +155,15 @@ export default function CreateHuntPage() {
         throw new Error((errBody as { error?: string }).error || "Failed to generate hunt configuration");
       }
 
-      const huntConfig = await configRes.json();
+      const huntConfig = (await configRes.json()) as HuntConfig & { geocodeError?: string };
       setConfig(huntConfig);
+      if (huntConfig.geocodeError) {
+        alert(huntConfig.geocodeError);
+      } else if (!Array.isArray(huntConfig.waypoints) || huntConfig.waypoints.length === 0) {
+        alert(
+          "Generate completed but no waypoints were returned. Check Mapbox token (MAPBOX_SECRET_TOKEN or NEXT_PUBLIC_MAPBOX_TOKEN) and try again.",
+        );
+      }
       // Questions are NOT pre-generated: AI will generate a fresh question per player when they reach each location (see get-question API).
       setQuestions([]);
     } catch (error: any) {
@@ -169,6 +178,10 @@ export default function CreateHuntPage() {
     e.preventDefault();
     if (!config) {
       alert("Please generate hunt configuration first");
+      return;
+    }
+    if (!Array.isArray(config.waypoints) || config.waypoints.length === 0) {
+      alert("Cannot save: no waypoints in this configuration. Generate again after fixing Mapbox / geocoding.");
       return;
     }
 

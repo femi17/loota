@@ -240,6 +240,21 @@ function stateMatchesReverseRegion(expectedState: string, regionText: string | u
   return false;
 }
 
+/**
+ * Mapbox often omits `region.*` on the first reverse feature; state still appears in place_name / context text.
+ */
+function stateAppearsInReverseAgg(agg: ReverseAgg, expectedState: string): boolean {
+  if (stateMatchesReverseRegion(expectedState, agg.regionText)) return true;
+  const exp = normalizeStateName(expectedState);
+  if (!exp) return false;
+  const hay = agg.allTextLower;
+  if (hay.includes(exp)) return true;
+  const compact = exp.replace(/\s+/g, "");
+  if (compact.length >= 4 && hay.includes(compact)) return true;
+  if (exp === "abuja" && /federal capital|fct|abuja/.test(hay)) return true;
+  return false;
+}
+
 /** Whether reverse-geocode text reliably mentions the expected LGA (handles slashes, hyphens). */
 function reverseTextMentionsLga(allTextLower: string, expectedLga: string): boolean {
   const raw = expectedLga.trim();
@@ -272,9 +287,20 @@ async function verifyCoordinatesWithMapboxReverse(
 ): Promise<boolean> {
   const agg = await mapboxReverseAggregate(lng, lat);
   if (!agg) return false;
-  if (!stateMatchesReverseRegion(expectedState, agg.regionText)) return false;
+  if (!stateAppearsInReverseAgg(agg, expectedState)) return false;
   if (!expectedLga?.trim()) return true;
   return reverseTextMentionsLga(agg.allTextLower, expectedLga);
+}
+
+/** State must match; LGA optional (used when strict LGA text match fails but forward query targeted that LGA). */
+async function verifyCoordinatesStateOnly(
+  lng: number,
+  lat: number,
+  expectedState: string,
+): Promise<boolean> {
+  const agg = await mapboxReverseAggregate(lng, lat);
+  if (!agg) return false;
+  return stateAppearsInReverseAgg(agg, expectedState);
 }
 
 /** Find a coordinate inside the LGA using seed geocodes + optional random jitter; all points reverse-verified. */
@@ -454,6 +480,16 @@ Return JSON only:
 export async function POST(req: Request) {
   const auth = await requireAdmin();
   if (auth instanceof NextResponse) return auth;
+
+  if (!MAPBOX_TOKEN?.trim()) {
+    return NextResponse.json(
+      {
+        error:
+          "Mapbox token is missing. Set MAPBOX_SECRET_TOKEN or NEXT_PUBLIC_MAPBOX_TOKEN to generate waypoints.",
+      },
+      { status: 400 },
+    );
+  }
 
   try {
     const {
@@ -705,11 +741,54 @@ Return your response as JSON:
           });
         }
       } else if (singleState && expectedLga) {
-        logger.warn("admin/generate-hunt-config", "No Mapbox-verified point inside LGA (waypoint skipped)", {
-          index: i,
-          expectedLga,
-          expectedState: stateForLga,
-        });
+        logger.warn(
+          "admin/generate-hunt-config",
+          "Strict LGA verify failed; trying state-verified LGA centroid fallback",
+          { index: i, expectedLga, expectedState: stateForLga },
+        );
+        let emergency = await mapboxGeocode(`${expectedLga}, ${stateForLga}, Nigeria`);
+        if (
+          emergency &&
+          isInNigeria(emergency.lng, emergency.lat) &&
+          (await verifyCoordinatesStateOnly(emergency.lng, emergency.lat, stateForLga))
+        ) {
+          let key = waypointKey(emergency.lat, emergency.lng);
+          if (seenKeys.has(key)) {
+            for (let micro = 0; micro < 12; micro++) {
+              const jlng = emergency.lng + (Math.random() - 0.5) * 0.006;
+              const jlat = emergency.lat + (Math.random() - 0.5) * 0.006;
+              if (!isInNigeria(jlng, jlat)) continue;
+              if (!(await verifyCoordinatesStateOnly(jlng, jlat, stateForLga))) continue;
+              const k2 = waypointKey(jlat, jlng);
+              if (seenKeys.has(k2)) continue;
+              emergency = {
+                lng: jlng,
+                lat: jlat,
+                place_name: emergency.place_name,
+                regionText: emergency.regionText,
+                districtText: emergency.districtText,
+                placeText: emergency.placeText,
+              };
+              key = k2;
+              break;
+            }
+          }
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            const agg = await mapboxReverseAggregate(emergency.lng, emergency.lat);
+            const enriched: MapboxGeocodeResult = {
+              ...emergency,
+              place_name: agg?.place_name ?? emergency.place_name,
+              regionText: agg?.regionText ?? emergency.regionText,
+              districtText: agg?.districtText ?? emergency.districtText,
+            };
+            waypoints.push({
+              label: buildWaypointLabel(enriched, expectedLga, singleState),
+              lng: enriched.lng,
+              lat: enriched.lat,
+            });
+          }
+        }
       } else {
         const stateFallback = (singleState || expectedState || config.regionName)?.trim();
         const fallbackQuery = stateFallback ? `${stateFallback}, Nigeria` : "Lagos, Nigeria";
@@ -764,9 +843,62 @@ Return your response as JSON:
         deduped.push(w);
       }
     }
-    config.waypoints = deduped;
-    config.keysToWin = deduped.length;
-    config.numberOfHunts = deduped.length;
+
+    /** Last resort if strict LGA + fallbacks produced nothing (e.g. transient Mapbox quirks). */
+    let finalWaypoints = deduped;
+    if (finalWaypoints.length === 0 && n > 0) {
+      const recovered: { label: string; lng: number; lat: number }[] = [];
+      const used = new Set<string>();
+      for (let i = 0; i < n; i++) {
+        let st =
+          (singleState && singleState.trim()) ||
+          parseStateFromQuery(waypointQueries[i] ?? "") ||
+          String(config.regionName ?? "").trim();
+        if (!st || /^nigeria$/i.test(st) || /^nationwide$/i.test(st)) {
+          st = "Lagos";
+        }
+        const lgaForRow =
+          singleState && selectedLgasForWaypoints[i]
+            ? selectedLgasForWaypoints[i]
+            : i === 0 && chosenLga
+              ? chosenLga
+              : null;
+        const q = lgaForRow ? `${lgaForRow}, ${st}, Nigeria` : `${st}, Nigeria`;
+        const r = await mapboxGeocode(q);
+        if (!r || !isInNigeria(r.lng, r.lat)) continue;
+        if (!(await verifyCoordinatesStateOnly(r.lng, r.lat, st))) continue;
+        const k = waypointKey(r.lat, r.lng);
+        if (used.has(k)) continue;
+        used.add(k);
+        const agg = await mapboxReverseAggregate(r.lng, r.lat);
+        const enriched: MapboxGeocodeResult = {
+          ...r,
+          place_name: agg?.place_name ?? r.place_name,
+          regionText: agg?.regionText ?? r.regionText,
+          districtText: agg?.districtText ?? r.districtText,
+        };
+        recovered.push({
+          label: buildWaypointLabel(enriched, lgaForRow, singleState),
+          lng: enriched.lng,
+          lat: enriched.lat,
+        });
+      }
+      if (recovered.length > 0) {
+        logger.warn("admin/generate-hunt-config", "Recovered waypoints via final state-only geocode pass", {
+          count: recovered.length,
+          requested: n,
+        });
+        finalWaypoints = recovered;
+      }
+    }
+
+    config.waypoints = finalWaypoints;
+    config.keysToWin = finalWaypoints.length;
+    config.numberOfHunts = finalWaypoints.length;
+    if (finalWaypoints.length === 0 && n > 0) {
+      (config as { geocodeError?: string }).geocodeError =
+        "Mapbox returned no usable coordinates for this hunt. Check your Mapbox token, billing, and network, then try Generate again.";
+    }
 
     // Align start with first waypoint so hunt start and first destination match (avoids e.g. start in Kano but waypoints in Lagos)
     if (config.waypoints.length > 0) {
