@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { logger } from "@/lib/logger";
 import { rewriteLogoUrlsInQuestionText } from "@/lib/quiz-logo-url";
+import {
+  tryResolveMathMultipleChoice,
+  playerAnswerMatchesMathResolution,
+} from "@/lib/math-quiz-resolve";
 
 export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
@@ -275,6 +279,14 @@ Format your response as JSON:
         continue;
       }
 
+      if (kind === "math") {
+        const resolved = tryResolveMathMultipleChoice(question, options);
+        if (resolved) {
+          candidate.answer = resolved.canonicalOption;
+          return candidate;
+        }
+      }
+
       const verified = await verifyGeneratedQuestion(candidate, topic);
       if (verified) return candidate;
     }
@@ -298,6 +310,14 @@ export async function validateQuizAnswer(
 ): Promise<{ correct: boolean; reason?: string }> {
   if (!playerAnswer?.trim()) {
     return { correct: false, reason: "empty" };
+  }
+
+  const mathResolved = tryResolveMathMultipleChoice(question, options);
+  if (mathResolved) {
+    const ok = playerAnswerMatchesMathResolution(playerAnswer, mathResolved);
+    return ok
+      ? { correct: true, reason: "math_numeric" }
+      : { correct: false, reason: "math_numeric_mismatch" };
   }
 
   const prompt = `You are a strict but fair quiz grader. Decide if the player's answer is correct.

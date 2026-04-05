@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { requireAdmin } from "@/lib/server-auth";
 import { logger } from "@/lib/logger";
-import { getLgasForState } from "@/lib/nigeria-lgas";
+import {
+  getHuntDistrictsForState,
+  stateUsesLcdaMapboxSeeds,
+} from "@/lib/nigeria-hunt-districts";
 import { buildRotatedQuestionCategories } from "@/lib/hunt-quiz-categories";
 
 const openai = new OpenAI({
@@ -25,12 +28,16 @@ const NIGERIAN_STATES_AND_FCT = [
 const NIGERIA_BBOX = { minLng: 2.69, minLat: 4.27, maxLng: 14.68, maxLat: 13.9 };
 
 /**
- * Pick n LGAs without repeating until every LGA has been used once (then cycle in order).
- * When `first` is set and exists in the list, it is always waypoint 0 (home LGA).
+ * Pick n districts (LCDA for Lagos, LGA elsewhere) without repeating until the list is exhausted, then cycle.
+ * When `first` is set and exists in the list, it is always waypoint 0 (host's chosen home area).
  */
-function pickDistinctLgas(lgas: string[], n: number, first: string | null | undefined): string[] {
-  if (lgas.length === 0 || n <= 0) return [];
-  const uniq = [...new Set(lgas)];
+function pickDistinctDistricts(
+  districts: string[],
+  n: number,
+  first: string | null | undefined,
+): string[] {
+  if (districts.length === 0 || n <= 0) return [];
+  const uniq = [...new Set(districts)];
   for (let i = uniq.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [uniq[i], uniq[j]] = [uniq[j], uniq[i]];
@@ -51,7 +58,7 @@ function pickDistinctLgas(lgas: string[], n: number, first: string | null | unde
   return out;
 }
 
-/** Human waypoint label: place + LGA + state so players see where they are. */
+/** Human waypoint label: place + district (LGA/LCDA) + state so players see where they are. */
 function buildWaypointLabel(
   result: MapboxGeocodeResult,
   expectedLga: string | null,
@@ -379,11 +386,17 @@ async function resolveCoordinatesInsideLga(
   keyFn: (lat: number, lng: number) => string,
   preferredQueries: string[],
 ): Promise<MapboxGeocodeResult | null> {
+  const useLcda = stateUsesLcdaMapboxSeeds(expectedState);
   const seedQueries = [
     ...preferredQueries.filter(Boolean),
+    ...(useLcda ? [`${expectedLga} LCDA, ${expectedState}, Nigeria`] : []),
     `${expectedLga}, ${expectedState}, Nigeria`,
-    `${expectedLga} Local Government Area, ${expectedState}, Nigeria`,
-    `${expectedLga} LGA, ${expectedState}, Nigeria`,
+    ...(useLcda
+      ? []
+      : [
+          `${expectedLga} Local Government Area, ${expectedState}, Nigeria`,
+          `${expectedLga} LGA, ${expectedState}, Nigeria`,
+        ]),
   ];
   const uniqSeeds = [...new Set(seedQueries.map((q) => q.trim()).filter(Boolean))];
 
@@ -487,28 +500,30 @@ function parseStateFromQuery(query: string): string | null {
 }
 
 /**
- * Ask OpenAI for specific place queries inside each selected LGA.
- * Falls back to plain "LGA, State, Nigeria" outside this helper when parsing fails.
+ * Ask OpenAI for specific place queries inside each selected district (LCDA or LGA).
+ * Falls back to plain "District, State, Nigeria" outside this helper when parsing fails.
  */
-async function generateLgaSpecificPlaceQueries(
+async function generateDistrictSpecificPlaceQueries(
   state: string,
-  lgas: string[],
+  districts: string[],
 ): Promise<string[] | null> {
-  if (!lgas.length) return null;
-  const prompt = `Generate one specific, interesting, mappable place query for EACH LGA below in ${state}, Nigeria.
+  if (!districts.length) return null;
+  const div = stateUsesLcdaMapboxSeeds(state) ? "LCDA" : "LGA";
+  const divPlural = stateUsesLcdaMapboxSeeds(state) ? "LCDAs" : "LGAs";
+  const prompt = `Generate one specific, interesting, mappable place query for EACH ${div} below in ${state}, Nigeria.
 
-LGAs:
-${lgas.map((lga, i) => `${i + 1}. ${lga}`).join("\n")}
+${divPlural}:
+${districts.map((d, i) => `${i + 1}. ${d}`).join("\n")}
 
 Rules:
-- Return exactly ${lgas.length} place queries, same order as the LGAs.
-- Each query must name a precise place INSIDE that row's LGA (not another LGA).
-- Each query MUST include the LGA name in the string (middle segment), e.g. "Oshodi Bus Terminal, Oshodi-Isolo, ${state}, Nigeria".
+- Return exactly ${districts.length} place queries, same order as the list above.
+- Each query must name a precise place INSIDE that row's ${div} (not another ${div}).
+- Each query MUST include that row's ${div} name in the string (middle segment), e.g. "Oshodi Bus Terminal, Oshodi-Isolo, ${state}, Nigeria".
 - Use DIFFERENT venue types across rows (market, stadium, hospital, junction, mall, school, park, bus stop) — do not repeat the same venue name twice.
 - Prefer real places Mapbox can geocode in Nigeria.
-- The server reverse-geocodes every waypoint and discards coordinates that are not inside the named LGA—queries must name places that actually lie in that LGA.
-- Avoid vague names like only "Market, Lagos, Nigeria" without LGA context.
-- Format each as: "Place name, LGA name, ${state}, Nigeria"
+- The server reverse-geocodes every waypoint and discards coordinates that are not inside the named ${div}—queries must name places that actually lie in that ${div}.
+- Avoid vague names like only "Market, Lagos, Nigeria" without ${div} context.
+- Format each as: "Place name, ${div} name, ${state}, Nigeria"
 - Keep each query short and geocoding-friendly.
 
 Return JSON only:
@@ -537,10 +552,12 @@ Return JSON only:
     const out = parsed.queries
       .map((q) => String(q ?? "").trim())
       .filter(Boolean)
-      .slice(0, lgas.length);
-    return out.length === lgas.length ? out : null;
+      .slice(0, districts.length);
+    return out.length === districts.length ? out : null;
   } catch (error) {
-    logger.warn("admin/generate-hunt-config", "generateLgaSpecificPlaceQueries failed", { err: error });
+    logger.warn("admin/generate-hunt-config", "generateDistrictSpecificPlaceQueries failed", {
+      err: error,
+    });
     return null;
   }
 }
@@ -606,7 +623,7 @@ Target Spend Per User drives everything. From it, determine in this order:
 3. Question categories: OMIT from your JSON. The server assigns exactly four categories in rotation for every hunt: Math, General Knowledge, Guess the logo, Guess the flag (repeating across locations in that order).
 
 4. Where the hunt takes place (locations drive spending: travel, rent, bus, plane, refuel, rest):
-   - Host chose: ${singleState ? `Single state = "${singleState}". Locations will be chosen automatically from random Local Government Areas (LGAs) within ${singleState}. Return regionName as "${singleState}". Do NOT return startLocationQuery or waypointQueries—we will assign LGA-based locations server-side.` : "Nationwide. You may spread waypoints across different states. Pick a start state and location, then distribute waypoints across states. Return regionName as \"Nigeria\" or \"Nationwide\". Return startLocationQuery and waypointQueries: array of exactly numberOfHunts strings, each in \"Place, State, Nigeria\" format."}
+   - Host chose: ${singleState ? `Single state = "${singleState}". Locations will be chosen automatically from random local council areas within ${singleState} (Lagos uses LCDAs; all other states use the standard LGA list as council areas). Return regionName as "${singleState}". Do NOT return startLocationQuery or waypointQueries—we assign council-area-based locations server-side.` : "Nationwide. You may spread waypoints across different states. Pick a start state and location, then distribute waypoints across states. Return regionName as \"Nigeria\" or \"Nationwide\". Return startLocationQuery and waypointQueries: array of exactly numberOfHunts strings, each in \"Place, State, Nigeria\" format."}
    - You MUST use only these 37 options for state names: ${NIGERIAN_STATES_AND_FCT.join(", ")}.
    - CRITICAL for accurate map pins: Every location string will be geocoded by Mapbox. Use the exact format "Place, State, Nigeria" so Mapbox returns correct coordinates. Examples: "Ikeja, Lagos, Nigeria", "Victoria Island, Lagos, Nigeria", "Port Harcourt, Rivers, Nigeria". Do NOT use abbreviations or missing "Nigeria".
    - ${singleState ? "Return regionName only (no startLocationQuery or waypointQueries)." : "Return regionName, startLocationQuery (one string for the first location), and waypointQueries: array of exactly numberOfHunts strings, each in \"Place, State, Nigeria\" format. Do NOT return coordinates."}
@@ -683,7 +700,7 @@ Return your response as JSON:
     config.keysToWin = n;
     config.questionCategories = buildRotatedQuestionCategories(n);
 
-    // When single state: pick LGAs (use huntLga for first if provided), then one location per LGA
+    // Single state: pick districts (LCDA for Lagos, LGA elsewhere); huntLga holds the host's home district name
     const chosenLga = typeof huntLga === "string" && huntLga.trim() ? huntLga.trim() : null;
     let startQuery =
       typeof config.startLocationQuery === "string"
@@ -695,13 +712,18 @@ Return your response as JSON:
 
     let selectedLgasForWaypoints: string[] = [];
     if (singleState && n > 0) {
-      const lgas = getLgasForState(singleState);
-      if (lgas.length > 0) {
-        const selectedLgas: string[] = pickDistinctLgas(lgas, n, chosenLga && lgas.includes(chosenLga) ? chosenLga : null);
-        selectedLgasForWaypoints = selectedLgas;
-        // Ask OpenAI for specific places inside each selected LGA (not just LGA centroids).
-        const specificQueries = await generateLgaSpecificPlaceQueries(singleState, selectedLgas);
-        waypointQueries = specificQueries ?? selectedLgas.map((lga) => `${lga}, ${singleState}, Nigeria`);
+      const districts = getHuntDistrictsForState(singleState);
+      if (districts.length > 0) {
+        const selectedDistricts: string[] = pickDistinctDistricts(
+          districts,
+          n,
+          chosenLga && districts.includes(chosenLga) ? chosenLga : null,
+        );
+        selectedLgasForWaypoints = selectedDistricts;
+        const specificQueries = await generateDistrictSpecificPlaceQueries(singleState, selectedDistricts);
+        waypointQueries =
+          specificQueries ??
+          selectedDistricts.map((d) => `${d}, ${singleState}, Nigeria`);
         startQuery = waypointQueries[0] ?? startQuery;
       }
     }
@@ -733,7 +755,7 @@ Return your response as JSON:
 
       const stateForLga =
         (expectedState && expectedState.trim()) || (singleState && singleState.trim()) || "";
-      const allStateLgas = singleState ? getLgasForState(singleState) : [];
+      const allStateLgas = singleState ? getHuntDistrictsForState(singleState) : [];
 
       if (singleState && stateForLga && allStateLgas.length > 0) {
         const primary =
@@ -775,7 +797,7 @@ Return your response as JSON:
         const expectedLga = primaryLgaForSlot;
         const queriesToTry: string[] = [];
         if (singleState) {
-          const lgas = getLgasForState(singleState);
+          const lgas = getHuntDistrictsForState(singleState);
           if (lgas.length > 0) {
             const primary = waypointQueries[i];
             if (primary) queriesToTry.push(primary);
@@ -818,7 +840,7 @@ Return your response as JSON:
         }
 
         if (!result && singleState && stateForLga) {
-          for (const lgaTry of shuffleCopy(getLgasForState(singleState))) {
+          for (const lgaTry of shuffleCopy(getHuntDistrictsForState(singleState))) {
             result = await tryForwardOnlyLga(lgaTry, stateForLga, seenKeys, waypointKey);
             if (result) {
               labelLga = lgaTry;
@@ -951,11 +973,15 @@ Return your response as JSON:
       }
     }
 
-    /** Pad to target count with forward-only LGA hits (single state) or state centroid. */
+    /** Pad to target count with forward-only district hits (single state) or state centroid. */
     const usedKeysFinal = new Set(finalWaypoints.map((w) => waypointKey(w.lat, w.lng)));
-    while (finalWaypoints.length < n && singleState && getLgasForState(singleState).length > 0) {
+    while (
+      finalWaypoints.length < n &&
+      singleState &&
+      getHuntDistrictsForState(singleState).length > 0
+    ) {
       let added = false;
-      for (const lgaTry of shuffleCopy(getLgasForState(singleState))) {
+      for (const lgaTry of shuffleCopy(getHuntDistrictsForState(singleState))) {
         const r = await tryForwardOnlyLga(lgaTry, singleState, usedKeysFinal, waypointKey);
         if (!r) continue;
         usedKeysFinal.add(waypointKey(r.lat, r.lng));

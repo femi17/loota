@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server-auth";
 import { validateQuizAnswer } from "@/lib/openai";
+import {
+  tryResolveMathMultipleChoice,
+  playerAnswerMatchesMathResolution,
+} from "@/lib/math-quiz-resolve";
 import { logger } from "@/lib/logger";
 import { isHuntPastEndDate } from "@/lib/hunt-schedule";
 
@@ -130,7 +134,10 @@ export async function POST(request: NextRequest) {
 
   let correct: boolean;
 
-  if (!process.env.OPENAI_API_KEY) {
+  const mathMc = tryResolveMathMultipleChoice(question, options);
+  if (mathMc) {
+    correct = playerAnswerMatchesMathResolution(playerAnswer, mathMc);
+  } else if (!process.env.OPENAI_API_KEY) {
     const normalized = playerAnswer.trim().toLowerCase().replace(/\s+/g, " ");
     const correctNormalized = correctAnswer.trim().toLowerCase().replace(/\s+/g, " ");
     const optionMatched =

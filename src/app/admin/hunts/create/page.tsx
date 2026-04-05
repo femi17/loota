@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { supabase } from "@/lib/supabase/client";
-import { getLgasForState } from "@/lib/nigeria-lgas";
+import { getHuntDistrictsForState } from "@/lib/nigeria-hunt-districts";
 import { HUNT_QUESTION_CATEGORIES } from "@/lib/hunt-quiz-categories";
 import Link from "next/link";
 
@@ -13,7 +13,7 @@ type HuntConfig = {
   keysToWin: number;
   /** Set when Mapbox could not resolve any waypoints */
   geocodeError?: string;
-  /** Non-fatal: e.g. swapped LGA when the planned one could not be verified */
+  /** Non-fatal: e.g. swapped area when the planned LGA/LCDA could not be verified */
   geocodeWarnings?: string[];
   regionName?: string;
   startLocation?: { lng: number; lat: number };
@@ -67,7 +67,7 @@ export default function CreateHuntPage() {
     numberOfWinners: "",
     targetSpendPerUser: "",
     huntLocation: "Lagos",
-    huntLga: getLgasForState("Lagos")[0] ?? "",
+    huntLga: getHuntDistrictsForState("Lagos")[0] ?? "",
     startDate: "",
     endDate: "",
     entryRequirement: "0",
@@ -482,11 +482,11 @@ export default function CreateHuntPage() {
                   value={formData.huntLocation}
                   onChange={(e) => {
                     const newState = e.target.value;
-                    const lgas = getLgasForState(newState);
+                    const districts = getHuntDistrictsForState(newState);
                     setFormData({
                       ...formData,
                       huntLocation: newState,
-                      huntLga: lgas.length > 0 ? lgas[0] : "",
+                      huntLga: districts.length > 0 ? districts[0]! : "",
                     });
                   }}
                   required
@@ -503,10 +503,10 @@ export default function CreateHuntPage() {
                 </p>
                 {formData.huntLocation &&
                   formData.huntLocation !== "Nationwide" &&
-                  getLgasForState(formData.huntLocation).length > 0 && (
+                  getHuntDistrictsForState(formData.huntLocation).length > 0 && (
                     <div className="mt-4">
                       <label className="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
-                        LGA (Local Government Area)
+                        LCDA (local council area)
                       </label>
                       <select
                         value={formData.huntLga}
@@ -515,12 +515,16 @@ export default function CreateHuntPage() {
                         }
                         className="w-full px-4 py-3 rounded-xl bg-white border border-[#F1F5F9] text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent"
                       >
-                        {getLgasForState(formData.huntLocation).map((lga) => (
-                          <option key={lga} value={lga}>
-                            {lga}
+                        {getHuntDistrictsForState(formData.huntLocation).map((d) => (
+                          <option key={d} value={d}>
+                            {d}
                           </option>
                         ))}
                       </select>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Same picker in every state: Lagos lists official LCDAs; other states use Nigeria’s standard LGA
+                        names as the local council area for each waypoint.
+                      </p>
                     </div>
                   )}
               </div>
