@@ -717,7 +717,12 @@ export function HuntsStatusDrawerContent({
               <p className="mt-3 text-xs font-bold text-red-600">{locationQuizError}</p>
             ) : null}
           </div>
-        ) : waypointIndexAtPlayer !== null && !showLocationQuiz && nextWaypointAfterCurrent && keys < keysToWin && activeHuntId && getQuestionForStep ? (
+        ) : // Only while en route: at the target waypoint GPS-wise, never pair this with unlock-task "Start".
+        waypointIndexAtPlayer === null &&
+          nextWaypointAfterCurrent &&
+          keys < keysToWin &&
+          activeHuntId &&
+          getQuestionForStep ? (
           <NextQuizAtLocation
             nextWaypoint={nextWaypointAfterCurrent}
             stepIndex={keys}
