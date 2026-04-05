@@ -2646,13 +2646,15 @@ export default function HuntsPage() {
 
     // Use player position, or neutral Nigeria center until GPS/join/session gives coords (do not place avatar on first waypoint).
     // When a route is visible (blue line), avatar must be at route start — playerPos can be stale/GPS and miles off.
-    const showDetour =
-      (stopFlow?.status === "to_stop" &&
-        (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest") &&
-        !stopFlow?.restInPlace) ||
-      isTravellingToHospital;
+    // Pin avatar at polyline start for constraint detours (refuel/rest/rejuvenate) while traveling.
+    // Do NOT do this during the hospital ambulance leg: travel sim updates playerPos along the route but
+    // route start would freeze the bus while HUD % still advances.
+    const pinAvatarAtRouteStart =
+      stopFlow?.status === "to_stop" &&
+      (stopFlow.kind === "rejuvenate" || stopFlow.kind === "refuel" || stopFlow.kind === "rest") &&
+      !stopFlow?.restInPlace;
     const routeStart =
-      showDetour && routeCoords.length >= 2
+      pinAvatarAtRouteStart && routeCoords.length >= 2
         ? { lng: routeCoords[0]![0], lat: routeCoords[0]![1] }
         : null;
     const pos =
@@ -2686,7 +2688,8 @@ export default function HuntsPage() {
       const prepWalkDrivesMarker = Boolean(
         prepPlanRef.current?.walkDuringPrep && prepWalkRef.current,
       );
-      if ((!isTraveling || isTravellingToHospital) && !prepWalkDrivesMarker) {
+      // While traveling, RAF below moves the marker; hospital bus uses same path as normal travel.
+      if (!isTraveling && !prepWalkDrivesMarker) {
         youMarkerRef.current.setLngLat([pos.lng, pos.lat]);
       }
     }
@@ -2770,7 +2773,7 @@ export default function HuntsPage() {
   // Avatar position during travel: interpolate along route (route start = avatar start). Never use playerPos when traveling — it can be stale or from GPS.
   useEffect(() => {
     if (!mapReady || !mapRef.current || !youMarkerRef.current) return;
-    if (!isTraveling || isTravellingToHospital) return; // Faint/hospital uses separate ambulance marker
+    if (!isTraveling) return;
     const tr = travelRef.current;
     if (!tr?.coords || tr.coords.length < 2) return;
 
@@ -2792,14 +2795,14 @@ export default function HuntsPage() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [mapReady, isTraveling, isTravellingToHospital, travelPause]);
+  }, [mapReady, isTraveling, travelPause]);
 
   // While traveling, keep the camera on the same interpolated position as the avatar (RAF marker tick).
   // The old playerPos + useEffect path used 250ms state updates vs 60fps marker = stepped camera + stacked easeTo = flicker on fast modes.
   // Intervals/durations aligned with `broadcast/[huntId]/page.tsx` focused follow.
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
-    if (!isTraveling || isTravellingToHospital) return;
+    if (!isTraveling) return;
 
     const map = mapRef.current;
     const CAMERA_INTERVAL_TRAVEL_MS = 900;
@@ -2872,7 +2875,7 @@ export default function HuntsPage() {
       cancelAnimationFrame(rafId);
       huntsTravelCameraLastMoveAtRef.current = 0;
     };
-  }, [mapReady, isTraveling, isTravellingToHospital, travelPause]);
+  }, [mapReady, isTraveling, travelPause]);
 
   // Faint phase: ambulance moves from 2 km away to user over 2 min, then we route to hospital
   useEffect(() => {
