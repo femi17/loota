@@ -30,6 +30,7 @@ type PlayerPositionNameRow = {
 export default function AdminHuntsPage() {
   const router = useRouter();
   const [hunts, setHunts] = useState<Hunt[]>([]);
+  const [registrationsByHunt, setRegistrationsByHunt] = useState<Record<string, number>>({});
   const [winnersByHunt, setWinnersByHunt] = useState<Record<string, Array<{
     player_id: string;
     won_at: string;
@@ -82,6 +83,23 @@ export default function AdminHuntsPage() {
 
           const huntIds = huntsData.map((h) => h.id);
           if (huntIds.length > 0) {
+            // Total registrations per hunt (used in Manage Hunts cards)
+            const { data: regRows } = await supabase
+              .from("hunt_registrations")
+              .select("hunt_id")
+              .in("hunt_id", huntIds);
+            if (regRows) {
+              const counts: Record<string, number> = {};
+              for (const r of regRows as unknown as Array<{ hunt_id?: string }>) {
+                const hid = String(r?.hunt_id ?? "");
+                if (!hid) continue;
+                counts[hid] = (counts[hid] ?? 0) + 1;
+              }
+              setRegistrationsByHunt(counts);
+            } else {
+              setRegistrationsByHunt({});
+            }
+
             const { data: winnersData, error: winnersError } = await supabase
               .from("hunt_winners")
               .select("hunt_id, player_id, won_at, keys_earned, keys_required")
@@ -263,7 +281,7 @@ export default function AdminHuntsPage() {
                         </span>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{hunt.description}</p>
-                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div>
                           <p className="text-xs font-black uppercase tracking-widest text-slate-500">
                             Prize Pool
@@ -278,6 +296,14 @@ export default function AdminHuntsPage() {
                           </p>
                           <p className="mt-1 text-lg font-extrabold text-[#0F172A]">
                             {hunt.number_of_winners}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase tracking-widest text-slate-500">
+                            Registered
+                          </p>
+                          <p className="mt-1 text-lg font-extrabold text-[#0F172A]">
+                            {registrationsByHunt[hunt.id] ?? 0}
                           </p>
                         </div>
                         <div>
