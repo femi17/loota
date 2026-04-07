@@ -6,7 +6,7 @@ import {
   getHuntDistrictsForState,
   stateUsesLcdaMapboxSeeds,
 } from "@/lib/nigeria-hunt-districts";
-import { buildRotatedQuestionCategories } from "@/lib/hunt-quiz-categories";
+import { buildRandomQuestionCategories } from "@/lib/hunt-quiz-categories";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
@@ -698,7 +698,7 @@ Return your response as JSON:
     const n = Math.max(1, Number(config.numberOfHunts) || 1);
     config.numberOfHunts = n;
     config.keysToWin = n;
-    config.questionCategories = buildRotatedQuestionCategories(n);
+    config.questionCategories = buildRandomQuestionCategories(n);
 
     // Single state: pick districts (LCDA for Lagos, LGA elsewhere); huntLga holds the host's home district name
     const chosenLga = typeof huntLga === "string" && huntLga.trim() ? huntLga.trim() : null;
@@ -1003,7 +1003,7 @@ Return your response as JSON:
     config.waypoints = finalWaypoints;
     config.keysToWin = wpLen;
     config.numberOfHunts = wpLen;
-    config.questionCategories = buildRotatedQuestionCategories(wpLen > 0 ? wpLen : n);
+    config.questionCategories = buildRandomQuestionCategories(wpLen > 0 ? wpLen : n);
     (config as { geocodeWarnings?: string[] }).geocodeWarnings = geocodeWarnings;
 
     if (wpLen === 0 && n > 0) {
