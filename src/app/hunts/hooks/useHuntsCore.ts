@@ -1169,6 +1169,17 @@ export function useHuntsCore() {
   const isAtCurrentWaypoint = useMemo(() => {
     if (!isNearWaypointGeo) return false;
 
+    // Plane transfer: arriving at the departure/arrival airport should not open the hunt Status quiz modal.
+    // The plane flow has its own UI states (boarding/disembarking/waiting).
+    if (
+      planeFlow?.stage === "to_departure" ||
+      planeFlow?.stage === "boarding" ||
+      planeFlow?.stage === "flying" ||
+      planeFlow?.stage === "disembarking"
+    ) {
+      return false;
+    }
+
     if (faintPhase != null || hospitalStay != null || isTravellingToHospital) {
       return false;
     }
@@ -1219,6 +1230,13 @@ export function useHuntsCore() {
   // When user is at the current waypoint (waypoint vs current location match), sync state and show status/quiz.
   useEffect(() => {
     if (!canPlayHunt || !activeHuntId) return;
+    if (
+      planeFlow?.stage === "to_departure" ||
+      planeFlow?.stage === "boarding" ||
+      planeFlow?.stage === "flying" ||
+      planeFlow?.stage === "disembarking"
+    )
+      return;
     if (faintPhase != null || hospitalStay != null || isTravellingToHospital) return;
     if (activeHuntId && readPendingHospitalHuntId() === activeHuntId) return;
 
@@ -1262,6 +1280,7 @@ export function useHuntsCore() {
     isAtCurrentWaypoint,
     huntPhase,
     stopFlow?.status,
+    planeFlow?.stage,
     faintPhase,
     hospitalStay,
     isTravellingToHospital,

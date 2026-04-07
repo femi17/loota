@@ -586,10 +586,10 @@ export function HuntsTravelDrawerContent({
                               {loadingThisMode ? (
                                 <>
                                   <span className="inline-block size-3.5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
-                                  Renting…
+                                  {o.modeId === "car" ? "Booking…" : "Renting…"}
                                 </>
                               ) : (
-                                <>Rent {formatNaira(o.rentCost)}</>
+                                <>{o.modeId === "car" ? "Book" : "Rent"} {formatNaira(o.rentCost)}</>
                               )}
                             </button>
                           ) : null}
@@ -639,10 +639,10 @@ export function HuntsTravelDrawerContent({
                           {loadingThisMode ? (
                             <>
                               <span className="inline-block size-3.5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
-                              Renting…
+                              {o.modeId === "car" ? "Booking…" : "Renting…"}
                             </>
                           ) : (
-                            <>Rent {formatNaira(o.rentCost)}</>
+                            <>{o.modeId === "car" ? "Book" : "Rent"} {formatNaira(o.rentCost)}</>
                           )}
                         </button>
                       ) : null}

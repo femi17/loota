@@ -3834,7 +3834,9 @@ export default function HuntsPage() {
         modeId === "motorbike"
           ? MOTO_REFUEL_EVERY_KM
           : modeId === "car"
-            ? CAR_REFUEL_EVERY_KM
+            ? ownedModesRef.current.has("car")
+              ? CAR_REFUEL_EVERY_KM
+              : undefined
             : undefined,
       nextRestAtKm: modeId === "motorbike" || modeId === "car" ? DRIVE_REST_EVERY_KM : undefined,
       nextBusStopAtKm: modeId === "bus" ? BUS_STOP_EVERY_KM : undefined,
@@ -5395,7 +5397,7 @@ export default function HuntsPage() {
               ? undefined
               : carRentByDistance() ?? undefined,
         prepSeconds: carOwned ? 0 : getPickupSeconds("car"),
-        prepLabel: carOwned ? undefined : "Rental car arriving",
+        prepLabel: carOwned ? undefined : "Driver arriving",
         // move time only (prep shown separately)
         etaSeconds:
           carEtaFromTraffic != null
@@ -6031,7 +6033,9 @@ export default function HuntsPage() {
         setPayError(
           modeId === "bus"
             ? "Not enough coins to rent and board bus. Buy coins to continue."
-            : "Not enough coins to rent. Buy coins to continue."
+            : modeId === "car" && !offer.owned
+              ? "Not enough coins to book a ride. Buy coins to continue."
+              : "Not enough coins to rent. Buy coins to continue."
         );
         openDrawer("coins");
         return;
