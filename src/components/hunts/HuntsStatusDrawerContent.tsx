@@ -334,6 +334,8 @@ export function HuntsStatusDrawerContent({
   const locationQuizTimedOutRef = useRef(false);
   /** Guard so "Start" for location quiz only runs once (avoids double fetch / double UI). */
   const locationQuizStartInProgressRef = useRef(false);
+  /** Debounce leaving the waypoint to avoid GPS jitter resetting the quiz UI mid-load. */
+  const locationQuizLeaveDebounceRef = useRef<number | null>(null);
   /** Guard so we only award key once per quiz (Continue handler). */
   const locationQuizKeyAwardedRef = useRef(false);
   /** Waypoint index for the quiz just passed — captured on submit so Continue is correct after realtime bumps keys. */
@@ -341,7 +343,18 @@ export function HuntsStatusDrawerContent({
   /** Target keys after unlock-task quiz (keys+1 at submit time). */
   const unlockTaskKeyTargetRef = useRef<number | null>(null);
   useEffect(() => {
-    if (waypointIndexAtPlayer == null) {
+    // If we re-enter quickly (GPS jitter), keep the quiz state so the UI doesn't flicker back to Start.
+    if (waypointIndexAtPlayer != null) {
+      if (locationQuizLeaveDebounceRef.current != null) {
+        window.clearTimeout(locationQuizLeaveDebounceRef.current);
+        locationQuizLeaveDebounceRef.current = null;
+      }
+      return;
+    }
+
+    if (locationQuizLeaveDebounceRef.current != null) return;
+    locationQuizLeaveDebounceRef.current = window.setTimeout(() => {
+      locationQuizLeaveDebounceRef.current = null;
       setLocationQuizQuestion(null);
       setLocationQuizAnswer("");
       setLocationQuizStage("intro");
@@ -350,7 +363,7 @@ export function HuntsStatusDrawerContent({
       setLocationQuizError(null);
       setLocationQuizFailPending(null);
       locationQuizStartInProgressRef.current = false;
-    }
+    }, 900);
   }, [waypointIndexAtPlayer]);
 
   // After showing "Oh no" message, wait then trigger reroute.

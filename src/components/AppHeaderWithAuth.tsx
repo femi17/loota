@@ -44,12 +44,14 @@ export function AppHeaderWithAuth({
     ? `Level ${profile.level} Loota`
     : "New Player";
 
-  // Get avatar URL from profile or generate default
+  // Get avatar URL from profile or deterministic fallback.
+  // Important: always pass a string to AppHeader so it doesn't flash its internal default avatar.
   const avatarUrl =
-    profile?.avatar_url ||
-    (user?.id
-      ? `https://api.dicebear.com/8.x/thumbs/svg?seed=${encodeURIComponent(user.id)}`
-      : undefined);
+    (typeof profile?.avatar_url === "string" && profile.avatar_url.trim()
+      ? profile.avatar_url.trim()
+      : user?.id
+        ? `https://api.dicebear.com/8.x/thumbs/svg?seed=${encodeURIComponent(user.id)}`
+        : "https://api.dicebear.com/8.x/thumbs/svg?seed=guest");
 
   // Fetch total user count
   useEffect(() => {
