@@ -63,6 +63,8 @@ export default function HowItWorksPage() {
               </p>
               <p className="mt-2 text-sm text-emerald-900/80 leading-relaxed">
                 Loading your wallet is done via <span className="font-bold">Paystack</span> — a secured payment gateway.
+                <span className="font-bold"> Wallet top-up is free and unlimited</span> (no extra charges/fees from Loota);
+                you only pay the amount you choose to add.
               </p>
             </div>
 
