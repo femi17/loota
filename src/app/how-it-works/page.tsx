@@ -61,6 +61,9 @@ export default function HowItWorksPage() {
                 You can start playing without paying. Coins only affect optional travel choices and
                 convenience (e.g. bus/plane, booking a ride), not your ability to join the hunt.
               </p>
+              <p className="mt-2 text-sm text-emerald-900/80 leading-relaxed">
+                Loading your wallet is done via <span className="font-bold">Paystack</span> — a secured payment gateway.
+              </p>
             </div>
 
             <section className="mt-8">
