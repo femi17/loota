@@ -246,12 +246,12 @@ export default function Home() {
                   >
                     {huntIsLive ? "Enter Hunt" : "Enter Lobby"}
                   </Link>
-                  <a
-                    href="#hunts"
+                  <Link
+                    href="/how-it-works"
                     className="px-8 py-5 bg-white border border-[#F1F5F9] rounded-full font-black text-sm uppercase tracking-[0.2em] text-[#0F172A] hover:border-[#2563EB]/40 transition-colors text-center"
                   >
-                    Browse Hunts
-                  </a>
+                    How it works
+                  </Link>
                 </div>
 
                 <h2 className="mt-6 text-lg sm:text-xl lg:text-2xl font-bold tracking-tight drop-shadow-[0_12px_40px_rgba(0,0,0,0.35)] text-balance">
