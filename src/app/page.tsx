@@ -209,54 +209,73 @@ export default function Home() {
                 <span className="text-white">Everyday</span>
               </h1>
 
-              <div className="bg-white/90 border border-[#F1F5F9] rounded-[2.5rem] p-10 soft-shadow">
-                <p className="text-[11px] font-black uppercase tracking-[0.35em] text-[#2563EB]">
-                  {activeHuntStartDate
-                    ? huntIsLive
-                      ? "Hunt is live"
-                      : "Next hunt starts soon"
-                    : "No active hunt"}
-                </p>
-                <div className="mt-6 flex items-center justify-center gap-6">
-                  <div className="text-center">
-                    <span className="text-7xl sm:text-8xl font-black tracking-tighter tabular-nums">
-                      {minutes}
-                    </span>
-                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-2">
-                      Minutes
-                    </p>
-                  </div>
-                  <span className="text-5xl font-light text-slate-200 mt-[-2rem]">
-                    :
-                  </span>
-                  <div className="text-center">
-                    <span className="text-7xl sm:text-8xl font-black tracking-tighter tabular-nums text-[#2563EB]">
-                      {seconds}
-                    </span>
-                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-2">
-                      Seconds
-                    </p>
-                  </div>
+              <div className="bg-transparent border border-[#F1F5F9] rounded-[2.5rem] p-10 soft-shadow relative overflow-hidden">
+                {/* YouTube background: keep UI readable; never affects layout */}
+                <div className="absolute inset-0 z-0 pointer-events-none hidden lg:block" aria-hidden="true">
+                  <iframe
+                    title="Loota thrill video"
+                    src="https://www.youtube.com/embed/JDXW04X3RUs?autoplay=1&mute=1&loop=1&controls=0&playlist=JDXW04X3RUs&modestbranding=1&rel=0&playsinline=1"
+                    className="w-full h-full"
+                    style={{ border: 0 }}
+                    allow="autoplay; encrypted-media"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/15 to-black/45" />
                 </div>
+                {/* White overlay so text always has contrast */}
+                <div className="absolute inset-0 z-10 bg-white/88 backdrop-blur-sm pointer-events-none" aria-hidden="true" />
 
-                <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
-                  <Link
-                    href={huntIsLive ? "/hunts" : "/lobby"}
-                    className="px-8 py-5 bg-[#0F172A] text-white rounded-full font-black text-sm uppercase tracking-[0.2em] transition-all hover:bg-[#2563EB] hover:scale-[1.02] active:scale-[0.98] shadow-2xl shadow-[#0F172A]/10 text-center"
-                  >
-                    {huntIsLive ? "Enter Hunt" : "Enter Lobby"}
-                  </Link>
-                  <Link
-                    href="/how-it-works"
-                    className="px-8 py-5 bg-white border border-[#F1F5F9] rounded-full font-black text-sm uppercase tracking-[0.2em] text-[#0F172A] hover:border-[#2563EB]/40 transition-colors text-center"
-                  >
-                    How it works
-                  </Link>
+                <div className="relative z-20">
+                  <p className="text-[11px] font-black uppercase tracking-[0.35em] text-[#2563EB]">
+                    {activeHuntStartDate
+                      ? huntIsLive
+                        ? "Hunt is live"
+                        : "Next hunt starts soon"
+                      : "No active hunt"}
+                  </p>
+                  <div className="mt-6 flex items-center justify-center gap-6">
+                    <div className="text-center">
+                      <span className="text-7xl sm:text-8xl font-black tracking-tighter tabular-nums">
+                        {minutes}
+                      </span>
+                      <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-2">
+                        Minutes
+                      </p>
+                    </div>
+                    <span className="text-5xl font-light text-slate-200 mt-[-2rem]">
+                      :
+                    </span>
+                    <div className="text-center">
+                      <span className="text-7xl sm:text-8xl font-black tracking-tighter tabular-nums text-[#2563EB]">
+                        {seconds}
+                      </span>
+                      <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-2">
+                        Seconds
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+                    <Link
+                      href={huntIsLive ? "/hunts" : "/lobby"}
+                      className="px-8 py-5 bg-[#0F172A] text-white rounded-full font-black text-sm uppercase tracking-[0.2em] transition-all hover:bg-[#2563EB] hover:scale-[1.02] active:scale-[0.98] shadow-2xl shadow-[#0F172A]/10 text-center"
+                    >
+                      {huntIsLive ? "Enter Hunt" : "Enter Lobby"}
+                    </Link>
+                    <Link
+                      href="/how-it-works"
+                      className="px-8 py-5 bg-white border border-[#F1F5F9] rounded-full font-black text-sm uppercase tracking-[0.2em] text-[#0F172A] hover:border-[#2563EB]/40 transition-colors text-center"
+                    >
+                      How it works
+                    </Link>
+                  </div>
+
+                  <h2 className="mt-6 text-lg sm:text-xl lg:text-2xl font-bold tracking-tight drop-shadow-[0_12px_40px_rgba(0,0,0,0.35)] text-balance">
+                    <span className="text-[#0F172A] text-xs sm:text-sm uppercase tracking-widest leading-snug">
+                      Loota is a live, map-based, skill-driven treasure hunt game
+                    </span>
+                  </h2>
                 </div>
-
-                <h2 className="mt-6 text-lg sm:text-xl lg:text-2xl font-bold tracking-tight drop-shadow-[0_12px_40px_rgba(0,0,0,0.35)] text-balance">
-                  <span className="text-[#0F172A] text-xs sm:text-sm uppercase tracking-widest leading-snug">Loota is a live, map-based, skill-driven treasure hunt game</span>
-                </h2>
               </div>
             </div>
           </div>
